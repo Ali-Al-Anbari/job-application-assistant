@@ -110,3 +110,24 @@ I changed that logic so sample jobs are only added if the `jobs` key does not ex
 - Sample jobs remain after reloading the dashboard
 
 ---
+
+## Manual Job Creation
+
+### Task
+Allow users to manually add job applications through dashboard.
+
+### AI Usage
+Copilot planned and implemented the form and Chrome storage update.
+
+### Change I made
+Made sure existing jobs safely default to an empty array if the storage key is missing.
+
+### Decision
+Kept the form inside `Dashboard.jsx` instead of creating another component.
+
+### Testing
+- Added a new application
+- New job appeared immediately in the table
+- Job remained after refreshing
+- Required fields prevent invalid submissions
+- Lint and build passed

@@ -20,6 +20,13 @@ body {
   margin-bottom: 28px;
 }
 
+.dashboard-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: #667085;
@@ -34,6 +41,66 @@ h1 {
   color: #101828;
   font-size: 32px;
   line-height: 1.2;
+}
+
+button {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: #175cd3;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.application-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+  padding: 24px;
+  border: 1px solid #dfe3ea;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.application-form label {
+  display: grid;
+  gap: 6px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.application-form input,
+.application-form select,
+.application-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  color: #172033;
+  font: inherit;
+  font-size: 14px;
+}
+
+.application-form textarea {
+  resize: vertical;
+}
+
+.application-form label:nth-of-type(7),
+.application-form .form-error,
+.application-form button {
+  grid-column: 1 / -1;
+}
+
+.form-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 13px;
 }
 
 .table-wrapper {
@@ -86,5 +153,15 @@ tbody tr:last-child td {
 @media (max-width: 720px) {
   .dashboard {
     padding: 32px 16px;
+  }
+
+  .dashboard-title-row,
+  .application-form {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-title-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
