@@ -6,6 +6,11 @@ import './App.css'
 
 function App() {
   const [count, setCount] = useState(0)
+  const openDashboard = () => {
+    window.chrome.tabs.create({
+      url: window.chrome.runtime.getURL('dashboard.html'),
+    })
+  }
 
   return (
     <>
@@ -27,6 +32,9 @@ function App() {
           onClick={() => setCount((count) => count + 1)}
         >
           Count is {count}
+        </button>
+        <button type="button" onClick={openDashboard}>
+          Open Dashboard
         </button>
       </section>
 

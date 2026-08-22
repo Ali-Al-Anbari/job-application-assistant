@@ -53,3 +53,20 @@ The popup and dashboard are separate interfaces, so routing was unnecessary.
 - Confirmed both pages were generated
 - Confirmed the popup worked in Chrome
 - Confirmed the dashboard worked in Chrome
+
+---
+g
+## Open Dashboard Button
+
+### Task
+Add a button to the popup that opens the dashboard in a new tab.
+
+### AI Usage
+Copilot planned and implemented the simplest Chrome API approach.
+
+### Decision
+Used the Chrome tabs API to open `dashboard.html`.
+
+### Testing
+- Confirmed the popup still opens
+- Confirmed the button opens the dashboard in a new tab
