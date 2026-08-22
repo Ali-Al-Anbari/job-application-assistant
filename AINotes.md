@@ -131,3 +131,22 @@ Kept the form inside `Dashboard.jsx` instead of creating another component.
 - Job remained after refreshing
 - Required fields prevent invalid submissions
 - Lint and build passed
+
+---
+
+## Edit and Delete Jobs
+
+### Task
+Allow users to edit and delete saved job applications.
+
+### AI Usage
+Copilot planned and implemented the update and delete logic.
+
+### Decision
+Reused the existing form for both adding and editing instead of creating a second form.
+
+### Testing
+- Edited a job and confirmed the changes persisted
+- Confirmed canceling a delete keeps the job
+- Deleted a job and confirmed it stayed deleted after refresh
+- Confirmed adding jobs still works

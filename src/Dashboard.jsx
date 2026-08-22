@@ -71,6 +71,7 @@ const statuses = [
 function Dashboard() {
   const [jobs, setJobs] = useState(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
+  const [editingJobId, setEditingJobId] = useState(null)
   const [formData, setFormData] = useState(emptyJobForm)
   const [formError, setFormError] = useState('')
 
@@ -111,26 +112,80 @@ function Dashboard() {
       return
     }
 
-    const newJob = {
-      id: window.crypto.randomUUID(),
-      company,
-      role,
-      location: formData.location.trim(),
-      status,
-      dateApplied: formData.dateApplied,
-      url: formData.url.trim(),
-      notes: formData.notes.trim(),
-      jobDescription: '',
-    }
     const stored = await window.chrome.storage.local.get('jobs')
     const storedJobs = stored.jobs ?? []
-    const updatedJobs = [...storedJobs, newJob]
+    let updatedJobs
+
+    if (editingJobId) {
+      updatedJobs = storedJobs.map((job) =>
+        job.id === editingJobId
+          ? {
+              ...job,
+              company,
+              role,
+              location: formData.location.trim(),
+              status,
+              dateApplied: formData.dateApplied,
+              url: formData.url.trim(),
+              notes: formData.notes.trim(),
+            }
+          : job,
+      )
+    } else {
+      updatedJobs = [
+        ...storedJobs,
+        {
+          id: window.crypto.randomUUID(),
+          company,
+          role,
+          location: formData.location.trim(),
+          status,
+          dateApplied: formData.dateApplied,
+          url: formData.url.trim(),
+          notes: formData.notes.trim(),
+          jobDescription: '',
+        },
+      ]
+    }
 
     await window.chrome.storage.local.set({ jobs: updatedJobs })
     setJobs(updatedJobs)
     setFormData(emptyJobForm)
     setFormError('')
+    setEditingJobId(null)
     setIsFormOpen(false)
+  }
+
+  function handleEdit(job) {
+    setEditingJobId(job.id)
+    setFormData({
+      company: job.company,
+      role: job.role,
+      location: job.location,
+      status: job.status,
+      dateApplied: job.dateApplied,
+      url: job.url,
+      notes: job.notes,
+    })
+    setFormError('')
+    setIsFormOpen(true)
+  }
+
+  function handleCancelEdit() {
+    setEditingJobId(null)
+    setFormData(emptyJobForm)
+    setFormError('')
+    setIsFormOpen(false)
+  }
+
+  async function handleDelete(jobId) {
+    if (!window.confirm('Delete this application?')) {
+      return
+    }
+
+    const updatedJobs = jobs.filter((job) => job.id !== jobId)
+    await window.chrome.storage.local.set({ jobs: updatedJobs })
+    setJobs(updatedJobs)
   }
 
   if (jobs === null) {
@@ -143,14 +198,23 @@ function Dashboard() {
         <p className="eyebrow">Job Application Assistant</p>
         <div className="dashboard-title-row">
           <h1>Job Application Dashboard</h1>
-          <button type="button" onClick={() => setIsFormOpen((open) => !open)}>
-            Add Application
+          <button
+            type="button"
+            onClick={() => {
+              setEditingJobId(null)
+              setFormData(emptyJobForm)
+              setFormError('')
+              setIsFormOpen((open) => !open)
+            }}
+          >
+            {isFormOpen && !editingJobId ? 'Close' : 'Add Application'}
           </button>
         </div>
       </header>
 
       {isFormOpen && (
         <form className="application-form" onSubmit={handleSubmit}>
+          <h2>{editingJobId ? 'Edit Application' : 'Add Application'}</h2>
           <label>
             Company *
             <input
@@ -221,7 +285,16 @@ function Dashboard() {
             />
           </label>
           {formError && <p className="form-error">{formError}</p>}
-          <button type="submit">Save Application</button>
+          <div className="form-actions">
+            <button type="submit">
+              {editingJobId ? 'Save Changes' : 'Save Application'}
+            </button>
+            {editingJobId && (
+              <button type="button" className="secondary-button" onClick={handleCancelEdit}>
+                Cancel
+              </button>
+            )}
+          </div>
         </form>
       )}
 
@@ -234,6 +307,7 @@ function Dashboard() {
               <th scope="col">Location</th>
               <th scope="col">Status</th>
               <th scope="col">Date Applied</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -246,6 +320,18 @@ function Dashboard() {
                   <span className="status">{job.status}</span>
                 </td>
                 <td>{job.dateApplied || 'Not applied'}</td>
+                <td className="table-actions">
+                  <button type="button" onClick={() => handleEdit(job)}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    onClick={() => handleDelete(job.id)}
+                  >
+                    Delete
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

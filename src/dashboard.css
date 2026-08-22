@@ -43,6 +43,13 @@ h1 {
   line-height: 1.2;
 }
 
+.application-form h2 {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #101828;
+  font-size: 20px;
+}
+
 button {
   padding: 10px 16px;
   border: 0;
@@ -93,8 +100,32 @@ button {
 
 .application-form label:nth-of-type(7),
 .application-form .form-error,
-.application-form button {
+.form-actions {
   grid-column: 1 / -1;
+}
+
+.form-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.secondary-button {
+  background: #667085;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.table-actions button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.danger-button {
+  background: #b42318;
 }
 
 .form-error {
