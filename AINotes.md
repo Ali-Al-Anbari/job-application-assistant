@@ -55,7 +55,7 @@ The popup and dashboard are separate interfaces, so routing was unnecessary.
 - Confirmed the dashboard worked in Chrome
 
 ---
-g
+
 ## Open Dashboard Button
 
 ### Task
@@ -70,3 +70,24 @@ Used the Chrome tabs API to open `dashboard.html`.
 ### Testing
 - Confirmed the popup still opens
 - Confirmed the button opens the dashboard in a new tab
+
+## Job Table Setup
+
+### Task
+Create the first dashboard table using sample job data.
+
+### AI Usage
+Copilot helped plan and implement the basic table structure.
+
+### Decision
+Kept the sample data and table directly in `Dashboard.jsx`.
+
+### Why
+The table is still simple, so splitting it up would add unnecessary complexity.
+
+### Testing
+- Dashboard displays 5 sample jobs
+- `npm run lint` passed
+- `npm run build` passed
+
+---
