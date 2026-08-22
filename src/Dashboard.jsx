@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import './dashboard.css'
 
 const sampleJobs = [
@@ -48,6 +49,29 @@ const sampleJobs = [
 ]
 
 function Dashboard() {
+  const [jobs, setJobs] = useState(null)
+
+  useEffect(() => {
+    async function loadJobs() {
+      const stored = await window.chrome.storage.local.get('jobs')
+      const hasJobsKey = Object.prototype.hasOwnProperty.call(stored, 'jobs')
+
+      if (!hasJobsKey) {
+        await window.chrome.storage.local.set({ jobs: sampleJobs })
+        setJobs(sampleJobs)
+        return
+      }
+
+      setJobs(stored.jobs)
+    }
+
+    loadJobs()
+  }, [])
+
+  if (jobs === null) {
+    return <main className="dashboard">Loading jobs...</main>
+  }
+
   return (
     <main className="dashboard">
       <header className="dashboard-header">
@@ -67,7 +91,7 @@ function Dashboard() {
             </tr>
           </thead>
           <tbody>
-            {sampleJobs.map((job) => (
+            {jobs.map((job) => (
               <tr key={job.id}>
                 <td>{job.company}</td>
                 <td>{job.role}</td>

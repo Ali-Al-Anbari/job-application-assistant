@@ -91,3 +91,22 @@ The table is still simple, so splitting it up would add unnecessary complexity.
 - `npm run build` passed
 
 ---
+
+## Persistent Job Storage
+
+### Task
+Store job applications using Chrome extension storage.
+
+### AI Usage
+Copilot planned the storage setup using `chrome.storage.local`.
+
+### Change I made
+Copilot originally suggested seeding sample jobs whenever the stored array was empty.
+
+I changed that logic so sample jobs are only added if the `jobs` key does not exist. An empty array could mean the user intentionally deleted all jobs, so the sample jobs should not automatically come back.
+
+### Testing
+- Extension builds and lints successfully
+- Sample jobs remain after reloading the dashboard
+
+---
