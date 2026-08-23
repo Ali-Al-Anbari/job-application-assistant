@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { appendJob } from './jobStorage.js'
 import './dashboard.css'
 
 const sampleJobs = [
@@ -134,23 +135,22 @@ function Dashboard() {
           : job,
       )
     } else {
-      updatedJobs = [
-        ...storedJobs,
-        {
-          id: window.crypto.randomUUID(),
-          company,
-          role,
-          location: formData.location.trim(),
-          status,
-          dateApplied: formData.dateApplied,
-          url: formData.url.trim(),
-          notes: formData.notes.trim(),
-          jobDescription: '',
-        },
-      ]
+      updatedJobs = await appendJob({
+        id: window.crypto.randomUUID(),
+        company,
+        role,
+        location: formData.location.trim(),
+        status,
+        dateApplied: formData.dateApplied,
+        url: formData.url.trim(),
+        notes: formData.notes.trim(),
+        jobDescription: '',
+      })
     }
 
-    await window.chrome.storage.local.set({ jobs: updatedJobs })
+    if (editingJobId) {
+      await window.chrome.storage.local.set({ jobs: updatedJobs })
+    }
     setJobs(updatedJobs)
     setFormData(emptyJobForm)
     setFormError('')

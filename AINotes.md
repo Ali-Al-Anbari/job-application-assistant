@@ -198,3 +198,29 @@ Use this extraction priority:
 - LinkedIn extracted role, company, location, description, and clean URL
 - Description formatting and location cleanup were improved
 - Lint and build passed
+
+---
+
+## Popup UI Redesign
+
+### Task
+Make the extension popup smaller and easier to use.
+
+### AI Usage
+Copilot helped redesign the popup and inline editing UI.
+
+### Changes
+- Removed duplicate editable fields
+- Added inline editing
+- Removed URL and date from the popup
+- Made the popup more compact
+- Improved description and notes display
+
+### Issue Found
+The first CSS cleanup caused the Chrome popup height to collapse.
+
+### Fix
+Removed fixed viewport sizing and allowed the popup height to follow its content naturally.
+
+### Testing
+Confirmed extraction, editing, saving, and popup sizing still work.
