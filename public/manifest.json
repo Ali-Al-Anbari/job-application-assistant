@@ -2,7 +2,25 @@
   "manifest_version": 3,
   "name": "Job Application Assistant",
   "version": "0.1.0",
-  "permissions": ["storage", "activeTab", "scripting"],
+
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "identity"
+  ],
+
+  "host_permissions": [
+    "https://gmail.googleapis.com/"
+  ],
+
+  "oauth2": {
+    "client_id": "809421851779-seiq2ht0su7njdstp20g53444adv6gkl.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.metadata"
+    ]
+  },
+
   "action": {
     "default_popup": "index.html"
   }

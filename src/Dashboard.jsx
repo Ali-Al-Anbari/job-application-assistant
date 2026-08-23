@@ -102,6 +102,56 @@ function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [selectedNote, setSelectedNote] = useState(null)
+  const [gmailState, setGmailState] = useState({ status: 'disconnected', email: '', error: '' })
+
+
+  useEffect(() => {
+  async function restoreGmailConnection() {
+    try {
+      const authResult = await window.chrome.identity.getAuthToken({
+        interactive: false,
+      })
+
+      const token = authResult?.token || authResult
+
+      if (!token) {
+        return
+      }
+
+      const response = await fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      )
+
+      if (response.status === 401) {
+        await window.chrome.identity.removeCachedAuthToken({ token })
+        return
+      }
+
+      if (!response.ok) {
+        return
+      }
+
+      const profile = await response.json()
+
+      setGmailState({
+        status: 'connected',
+        email: profile.emailAddress || '',
+        error: '',
+      })
+    } catch {
+      // No cached Gmail authorization.
+      // Leave the dashboard disconnected.
+    }
+  }
+
+  restoreGmailConnection()
+}, [])
+
 
   useEffect(() => {
     async function loadJobs() {
@@ -119,6 +169,50 @@ function Dashboard() {
 
     loadJobs()
   }, [])
+
+  async function connectGmail() {
+    setGmailState({ status: 'connecting', email: '', error: '' })
+
+    try {
+      const authResult = await window.chrome.identity.getAuthToken({ interactive: true })
+      const token = authResult?.token || authResult
+
+      if (!token) {
+        throw new Error('Authentication was cancelled.')
+      }
+
+      const response = await fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      )
+
+      if (response.status === 401) {
+        await window.chrome.identity.removeCachedAuthToken({ token })
+        throw new Error('Gmail authentication expired.')
+      }
+
+      if (!response.ok) {
+        throw new Error('Gmail profile request failed.')
+      }
+
+      const profile = await response.json()
+      setGmailState({
+        status: 'connected',
+        email: profile.emailAddress || '',
+        error: '',
+      })
+    } catch (error) {
+      setGmailState({
+        status: 'disconnected',
+        email: '',
+        error: error.message || 'Unable to connect Gmail.',
+      })
+    }
+  }
 
   useEffect(() => {
     function handleEscape(event) {
@@ -256,6 +350,19 @@ function Dashboard() {
           </p>
         </div>
         <div className="dashboard-title-row">
+          <div className={`gmail-status gmail-${gmailState.status}`}>
+            {gmailState.status === 'connected' ? (
+              <>
+                <strong>Gmail connected</strong>
+                <span>{gmailState.email}</span>
+              </>
+            ) : (
+              <button type="button" onClick={connectGmail} disabled={gmailState.status === 'connecting'}>
+                {gmailState.status === 'connecting' ? 'Connecting...' : 'Connect Gmail'}
+              </button>
+            )}
+            {gmailState.error && <span className="gmail-error">{gmailState.error}</span>}
+          </div>
           <button
             type="button"
             onClick={() => {
