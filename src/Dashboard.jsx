@@ -69,6 +69,24 @@ const statuses = [
   'Withdrawn',
 ]
 
+const gmailSignals = [
+  'application',
+  'applied',
+  'candidate',
+  'recruiting',
+  'recruiter',
+  'interview',
+  'assessment',
+  'coding challenge',
+  'next steps',
+  'position',
+  'opportunity',
+  'offer',
+  'unfortunately',
+  'moving forward',
+  'thank you for applying',
+]
+
 function EditIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -103,6 +121,7 @@ function Dashboard() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [selectedNote, setSelectedNote] = useState(null)
   const [gmailState, setGmailState] = useState({ status: 'disconnected', email: '', error: '' })
+  const [gmailScan, setGmailScan] = useState({ status: 'idle', messages: [], error: '' })
 
 
   useEffect(() => {
@@ -210,6 +229,97 @@ function Dashboard() {
         status: 'disconnected',
         email: '',
         error: error.message || 'Unable to connect Gmail.',
+      })
+    }
+  }
+
+  async function checkGmail() {
+    setGmailScan({ status: 'checking', messages: [], error: '' })
+
+    try {
+      const authResult = await window.chrome.identity.getAuthToken({ interactive: false })
+      const token = authResult?.token || authResult
+
+      if (!token) {
+        throw new Error('Gmail is not connected.')
+      }
+
+      const listResponse = await fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15',
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+
+      if (listResponse.status === 401) {
+        await window.chrome.identity.removeCachedAuthToken({ token })
+        setGmailState({ status: 'disconnected', email: '', error: 'Gmail authentication expired.' })
+        throw new Error('Gmail authentication expired.')
+      }
+
+      if (!listResponse.ok) {
+        throw new Error('Unable to list Gmail messages.')
+      }
+
+      const messageList = await listResponse.json()
+      const messages = messageList.messages ?? []
+      const metadataResults = await Promise.allSettled(
+        messages.map(async (message) => {
+          const params = new URLSearchParams({ format: 'metadata' })
+          params.append('metadataHeaders', 'Subject')
+          params.append('metadataHeaders', 'From')
+          params.append('metadataHeaders', 'Date')
+
+          const response = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}?${params}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          )
+
+          if (!response.ok) {
+            const error = new Error('Unable to read message metadata.')
+            error.status = response.status
+            throw error
+          }
+
+          return response.json()
+        }),
+      )
+
+      const unauthorized = metadataResults.some(
+        (result) => result.status === 'rejected' && result.reason?.status === 401,
+      )
+      if (unauthorized) {
+        await window.chrome.identity.removeCachedAuthToken({ token })
+        setGmailState({ status: 'disconnected', email: '', error: 'Gmail authentication expired.' })
+        throw new Error('Gmail authentication expired.')
+      }
+
+      const likelyMessages = metadataResults
+        .filter((result) => result.status === 'fulfilled')
+        .map((result) => result.value)
+        .map((message) => {
+          const headers = message.payload?.headers ?? []
+          const getHeader = (name) =>
+            headers.find((header) => header.name?.toLowerCase() === name.toLowerCase())?.value?.trim() || ''
+          const subject = getHeader('Subject')
+          const from = getHeader('From')
+          const searchableText = `${subject} ${from}`.toLowerCase()
+
+          return {
+            id: message.id,
+            threadId: message.threadId,
+            subject,
+            from,
+            internalDate: message.internalDate,
+            likelyJobRelated: gmailSignals.some((signal) => searchableText.includes(signal)),
+          }
+        })
+        .filter((message) => message.likelyJobRelated)
+
+      setGmailScan({ status: 'success', messages: likelyMessages, error: '' })
+    } catch (error) {
+      setGmailScan({
+        status: 'error',
+        messages: [],
+        error: error.message || 'Unable to check Gmail.',
       })
     }
   }
@@ -350,32 +460,78 @@ function Dashboard() {
           </p>
         </div>
         <div className="dashboard-title-row">
-          <div className={`gmail-status gmail-${gmailState.status}`}>
-            {gmailState.status === 'connected' ? (
-              <>
+        <div className={`gmail-status gmail-${gmailState.status}`}>
+          {gmailState.status === 'connected' ? (
+            <>
+              <div className="gmail-account">
                 <strong>Gmail connected</strong>
                 <span>{gmailState.email}</span>
-              </>
-            ) : (
-              <button type="button" onClick={connectGmail} disabled={gmailState.status === 'connecting'}>
-                {gmailState.status === 'connecting' ? 'Connecting...' : 'Connect Gmail'}
+              </div>
+
+              <button
+                type="button"
+                onClick={checkGmail}
+                disabled={gmailScan.status === 'checking'}
+              >
+                {gmailScan.status === 'checking' ? 'Checking Gmail...' : 'Check Gmail'}
               </button>
-            )}
-            {gmailState.error && <span className="gmail-error">{gmailState.error}</span>}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingJobId(null)
-              setFormData(emptyJobForm)
-              setFormError('')
-              setIsFormOpen((open) => !open)
-            }}
-          >
-            {isFormOpen && !editingJobId ? 'Close' : 'Add Application'}
-          </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={connectGmail}
+              disabled={gmailState.status === 'connecting'}
+            >
+              {gmailState.status === 'connecting'
+                ? 'Connecting...'
+                : 'Connect Gmail'}
+            </button>
+          )}
+
+          {gmailState.error && (
+            <span className="gmail-error">{gmailState.error}</span>
+          )}
         </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setEditingJobId(null)
+            setFormData(emptyJobForm)
+            setFormError('')
+            setIsFormOpen((open) => !open)
+          }}
+        >
+          {isFormOpen && !editingJobId ? 'Close' : 'Add Application'}
+        </button>
+      </div>
       </header>
+
+      {gmailScan.status !== 'idle' && (
+        <section className="gmail-results" aria-live="polite">
+          <h2>Recent application emails</h2>
+          {gmailScan.status === 'checking' && <p>Checking Gmail...</p>}
+          {gmailScan.status === 'error' && <p className="gmail-error">{gmailScan.error}</p>}
+          {gmailScan.status === 'success' && gmailScan.messages.length === 0 && (
+            <p>No likely application emails found in the recent messages checked.</p>
+          )}
+          {gmailScan.messages.length > 0 && (
+            <div className="gmail-message-list">
+              {gmailScan.messages.map((message) => (
+                <article key={message.id} className="gmail-message">
+                  <strong>{message.from || 'Unknown sender'}</strong>
+                  <span>{message.subject || '(No subject)'}</span>
+                  <time dateTime={message.internalDate ? new Date(Number(message.internalDate)).toISOString() : undefined}>
+                    {message.internalDate
+                      ? new Date(Number(message.internalDate)).toLocaleDateString()
+                      : 'Unknown date'}
+                  </time>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {isFormOpen && (
         <form className="application-form" onSubmit={handleSubmit}>

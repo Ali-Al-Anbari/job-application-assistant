@@ -230,8 +230,7 @@ Confirmed extraction, editing, saving, and popup sizing still work.
 ## Dashboard UI Redesign
 
 ### Task
-Make the dashboard more visually pleasing and in tune with popup. Also make
-the information more accessible.
+Make the dashboard more visually pleasing and in tune with popup. Also makethe information more accessible.
 
 ### AI Usage
 AI helped plan the dashboard redesign and identify layout issues as I tested the UI.
@@ -255,3 +254,78 @@ keep the table cell as a normal table cell and place the action icons inside a s
 
 ### Testing
 Confirmed editing, deletion, notes, and urls worked as intended.
+
+---
+
+## Email Auth
+
+### Task
+Connect the dashboard to Gmail using Google OAuth and verify that the connection works.
+
+### AI Usage
+AI helped plan the dashboard redesign and identify layout issues as I tested the UI.
+
+### Changes
+- Used chrome.identity.getAuthToken() for authentication.
+- Used the gmail.metadata scope instead of broader Gmail permissions.
+- Used GET /gmail/v1/users/me/profile as the first verification request.
+- Kept OAuth tokens in memory and relied on Chrome to manage the cached token.
+- Did not store access tokens in chrome.storage.local.
+- Did not add a backend for the initial Gmail connection.
+- Added a non-interactive authentication check when the dashboard loads so an existing Gmail connection is restored automatically.
+
+### Issue Found
+The first implementation only stored the Gmail connection state in React state.
+
+After refreshing the dashboard, the UI returned to "Connect Gmail" even though Chrome still had a valid cached OAuth token.
+
+### Fix
+Called chrome.identity.getAuthToken({ interactive: false }) when the dashboard loads and verified the cached token with the Gmail profile endpoint.
+
+### Testing
+Connected Gmail through the Google OAuth flow. 
+Verified the Gmail profile request succeeds.
+Confirmed the connected Gmail address is displayed.
+Confirmed refreshing the dashboard restores the Gmail connected state without opening another login prompt.
+Confirmed existing job tracking features still work.
+
+---
+
+## Gmail Email Detection
+
+### Task
+
+Check recent Gmail messages and identify emails that may be related to job applications.
+
+### AI Usage
+
+AI helped plan the Gmail API requests, decide what email data to retrieve, and create a simple method for identifying potentially job-related emails.
+
+### Changes
+
+- Added a user-controlled Check Gmail button instead of scanning Gmail automatically.
+- Limited each check to the 15 most recent emails.
+- Used the existing gmail.metadata scope.
+- Retrieved only the Subject, From, and Date metadata.
+- Used simple keyword matching to identify potentially job-related emails.
+- Used Promise.allSettled() so one failed email request does not stop the entire scan.
+- Kept retrieved Gmail data in React state instead of saving it to chrome.storage.local.
+- Did not retrieve email bodies or attachments.
+- Did not automatically change any job application statuses.
+
+### Issue Found
+
+The Check Gmail button was displayed underneath the Gmail connection information, which made the dashboard header look awkward.
+
+### Fix
+
+Grouped the Gmail account information separately and changed the connected Gmail layout to use a horizontal flex direction so the Check Gmail button appears next to the connection information.
+
+### Testing
+
+Confirmed Check Gmail retrieves recent message metadata.
+Confirmed likely job-related emails are displayed in the dashboard.
+Confirmed individual message failures do not stop the entire scan.
+Confirmed Gmail message data is not saved to chrome.storage.local.
+Confirmed checking Gmail does not modify existing applications.
+Confirmed the Gmail connection information and Check Gmail button display correctly together.

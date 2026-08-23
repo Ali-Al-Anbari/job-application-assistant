@@ -98,7 +98,7 @@ button {
 
 .gmail-status {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 4px;
   color: var(--dashboard-muted);
   font-size: 12px;
@@ -133,12 +133,83 @@ button {
 }
 
 .gmail-connected {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.gmail-account {
+  display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  gap: 2px;
+  align-items: flex-start;
 }
 
 .gmail-error {
   color: #ff9d9d;
+}
+
+.gmail-results {
+  margin-bottom: 24px;
+  padding: 20px;
+  border: 1px solid var(--dashboard-border);
+  border-radius: 8px;
+  background: var(--dashboard-surface);
+}
+
+.gmail-results h2 {
+  margin: 0 0 14px;
+  color: var(--dashboard-text);
+  font-size: 18px;
+}
+
+.gmail-results > p {
+  margin: 0;
+  color: var(--dashboard-muted);
+  font-size: 13px;
+}
+
+.gmail-message-list {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--dashboard-border);
+  border-radius: 6px;
+}
+
+.gmail-message {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(240px, 2fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 14px;
+  background: var(--dashboard-surface-raised);
+}
+
+.gmail-message + .gmail-message {
+  border-top: 1px solid var(--dashboard-border);
+}
+
+.gmail-message strong,
+.gmail-message span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gmail-message strong {
+  color: var(--dashboard-text);
+  font-size: 13px;
+}
+
+.gmail-message span,
+.gmail-message time {
+  color: var(--dashboard-muted);
+  font-size: 13px;
+}
+
+.gmail-message time {
+  white-space: nowrap;
 }
 
 .application-form {
@@ -512,6 +583,11 @@ tbody tr:last-child td {
 
   .gmail-connected {
     align-items: flex-start;
+  }
+
+  .gmail-message {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 
   .dashboard-filters,
