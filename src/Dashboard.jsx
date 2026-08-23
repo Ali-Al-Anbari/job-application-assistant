@@ -69,6 +69,30 @@ const statuses = [
   'Withdrawn',
 ]
 
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m4 16.5-.5 4 4-.5L19.2 8.3l-3.5-3.5L4 16.5Zm10.3-9.8 3.5 3.5M5.5 18.5l2-2" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  )
+}
+
+function DeleteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 7h14M10 11v6M14 11v6M9 7V4h6v3m-9 0 1 13h8l1-13" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  )
+}
+
+function ExternalLinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14 5h5v5M19 5l-8 8M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  )
+}
+
 function Dashboard() {
   const [jobs, setJobs] = useState(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
@@ -77,6 +101,7 @@ function Dashboard() {
   const [formError, setFormError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
+  const [selectedNote, setSelectedNote] = useState(null)
 
   useEffect(() => {
     async function loadJobs() {
@@ -95,6 +120,17 @@ function Dashboard() {
     loadJobs()
   }, [])
 
+  useEffect(() => {
+    function handleEscape(event) {
+      if (event.key === 'Escape') {
+        setSelectedNote(null)
+      }
+    }
+
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [])
+
   function handleFormChange(event) {
     const { name, value } = event.target
     setFormData((currentFormData) => ({
@@ -109,6 +145,10 @@ function Dashboard() {
     const company = formData.company.trim()
     const role = formData.role.trim()
     const status = formData.status.trim()
+    const dateApplied =
+      status !== 'Saved' && !formData.dateApplied 
+        ? new Date().toLocaleDateString('en-CA')
+        : formData.dateApplied
 
     if (!company || !role || !status) {
       setFormError('Company, role, and status are required.')
@@ -128,7 +168,7 @@ function Dashboard() {
               role,
               location: formData.location.trim(),
               status,
-              dateApplied: formData.dateApplied,
+              dateApplied,
               url: formData.url.trim(),
               notes: formData.notes.trim(),
             }
@@ -208,9 +248,14 @@ function Dashboard() {
   return (
     <main className="dashboard">
       <header className="dashboard-header">
-        <p className="eyebrow">Job Application Assistant</p>
-        <div className="dashboard-title-row">
+        <div>
+          <p className="eyebrow">Job Application Assistant</p>
           <h1>Job Application Dashboard</h1>
+          <p className="application-count">
+            {jobs.length} {jobs.length === 1 ? 'application' : 'applications'}
+          </p>
+        </div>
+        <div className="dashboard-title-row">
           <button
             type="button"
             onClick={() => {
@@ -338,7 +383,10 @@ function Dashboard() {
       </div>
 
       <div className="table-wrapper">
-        <table>
+        {visibleJobs.length === 0 ? (
+          <p className="empty-state">No applications match your filters.</p>
+        ) : (
+          <table>
           <thead>
             <tr>
               <th scope="col">Company</th>
@@ -346,36 +394,80 @@ function Dashboard() {
               <th scope="col">Location</th>
               <th scope="col">Status</th>
               <th scope="col">Date Applied</th>
+              <th scope="col">Notes</th>
               <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
             {visibleJobs.map((job) => (
               <tr key={job.id}>
-                <td>{job.company}</td>
-                <td>{job.role}</td>
-                <td>{job.location}</td>
+                <td className="company-cell">{job.company}</td>
+                <td className="role-cell">{job.role}</td>
+                <td className="location-cell">{job.location}</td>
                 <td>
-                  <span className="status">{job.status}</span>
+                  <span className="status" data-status={job.status}>
+                    {job.status}
+                  </span>
                 </td>
                 <td>{job.dateApplied || 'Not applied'}</td>
-                <td className="table-actions">
-                  <button type="button" onClick={() => handleEdit(job)}>
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="danger-button"
-                    onClick={() => handleDelete(job.id)}
-                  >
-                    Delete
-                  </button>
+                <td className="notes-cell">
+                  {job.notes ? (
+                    <button
+                      type="button"
+                      className="notes-preview"
+                      onClick={() => setSelectedNote(job)}
+                      title="View full note"
+                    >
+                      {job.notes}
+                    </button>
+                  ) : (
+                    <span className="muted-placeholder">-</span>
+                  )}
+                </td>
+                <td className="actions-cell">
+                  <div className="actions-wrapper">
+                    {job.url && (
+                      <a className="icon-button" href={job.url} target="_blank" rel="noreferrer" aria-label={`Open ${job.company} posting`} title="Open original posting">
+                        <ExternalLinkIcon />
+                      </a>
+                    )}
+                    <button type="button" className="icon-button" onClick={() => handleEdit(job)} aria-label={`Edit ${job.company}`} title="Edit application">
+                      <EditIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button danger-icon"
+                      onClick={() => handleDelete(job.id)}
+                      aria-label={`Delete ${job.company}`}
+                      title="Delete application"
+                    >
+                      <DeleteIcon />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        )}
       </div>
+      {selectedNote && (
+        <div className="note-modal-backdrop" onClick={() => setSelectedNote(null)}>
+          <section className="note-modal" role="dialog" aria-modal="true" aria-labelledby="note-title" onClick={(event) => event.stopPropagation()}>
+            <div className="note-modal-header">
+              <h2 id="note-title">Note</h2>
+                  <button type="button" className="icon-button" onClick={() => setSelectedNote(null)} aria-label="Close note">
+                <span aria-hidden="true">x</span>
+              </button>
+            </div>
+            <p className="note-context">
+              {selectedNote.company} · {selectedNote.role}
+            </p>
+            <p className="note-label">Full Note</p>
+            <p>{selectedNote.notes}</p>
+          </section>
+        </div>
+      )}
     </main>
   )
 }

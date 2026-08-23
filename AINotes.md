@@ -224,3 +224,34 @@ Removed fixed viewport sizing and allowed the popup height to follow its content
 
 ### Testing
 Confirmed extraction, editing, saving, and popup sizing still work.
+
+---
+
+## Dashboard UI Redesign
+
+### Task
+Make the dashboard more visually pleasing and in tune with popup. Also make
+the information more accessible.
+
+### AI Usage
+AI helped plan the dashboard redesign and identify layout issues as I tested the UI.
+
+### Changes
+- Kept the dark theme with purple accents.
+- Replaced Edit and Delete text buttons with SVG icons.
+- Added an external-link icon for opening the original job posting.
+- Added status badges for easier scanning.
+- Displayed notes directly in the table.
+- Allowed locations to wrap instead of truncating important information.
+- Show up to two lines of a note in the table.
+- Added a note viewer for reading the full note.
+- Kept action icons together in a fixed Actions column.
+
+### Issue Found
+Long notes made table rows taller, which caused the Actions column divider to become misaligned.
+
+### Fix
+keep the table cell as a normal table cell and place the action icons inside a separate flex wrapper.
+
+### Testing
+Confirmed editing, deletion, notes, and urls worked as intended.
