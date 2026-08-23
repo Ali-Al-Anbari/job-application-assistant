@@ -134,6 +134,33 @@ button {
   font-size: 13px;
 }
 
+.dashboard-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.dashboard-filters label {
+  display: grid;
+  gap: 6px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dashboard-filters input,
+.dashboard-filters select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  color: #172033;
+  font: inherit;
+  font-size: 14px;
+}
+
 .table-wrapper {
   overflow-x: auto;
   border: 1px solid #dfe3ea;
@@ -194,5 +221,9 @@ tbody tr:last-child td {
   .dashboard-title-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .dashboard-filters {
+    grid-template-columns: 1fr;
   }
 }

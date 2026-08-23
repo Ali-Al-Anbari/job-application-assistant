@@ -150,3 +150,26 @@ Reused the existing form for both adding and editing instead of creating a secon
 - Confirmed canceling a delete keeps the job
 - Deleted a job and confirmed it stayed deleted after refresh
 - Confirmed adding jobs still works
+
+---
+
+## Search and Status Filtering
+
+### Task
+Add search and status filtering to the dashboard.
+
+### AI Usage
+Copilot planned and implemented the filtering logic.
+
+### Decision
+Filtered the existing `jobs` array during render.
+
+### Change I made
+Made the location search handle missing values safely.
+
+### Testing
+- Search works for company, role, and location
+- Search is case-insensitive
+- Status filtering works
+- Search and status filtering work together
+- Lint and build passed

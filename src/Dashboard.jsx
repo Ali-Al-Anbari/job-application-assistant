@@ -74,6 +74,8 @@ function Dashboard() {
   const [editingJobId, setEditingJobId] = useState(null)
   const [formData, setFormData] = useState(emptyJobForm)
   const [formError, setFormError] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('All')
 
   useEffect(() => {
     async function loadJobs() {
@@ -192,6 +194,17 @@ function Dashboard() {
     return <main className="dashboard">Loading jobs...</main>
   }
 
+  const normalizedQuery = searchQuery.trim().toLowerCase()
+  const visibleJobs = jobs.filter((job) => {
+    const matchesSearch =
+      job.company.toLowerCase().includes(normalizedQuery) ||
+      job.role.toLowerCase().includes(normalizedQuery) ||
+      (job.location ?? '').toLowerCase().includes(normalizedQuery)
+    const matchesStatus = statusFilter === 'All' || job.status === statusFilter
+
+    return matchesSearch && matchesStatus
+  })
+
   return (
     <main className="dashboard">
       <header className="dashboard-header">
@@ -298,6 +311,32 @@ function Dashboard() {
         </form>
       )}
 
+      <div className="dashboard-filters">
+        <label>
+          Search jobs
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search company, role, or location"
+          />
+        </label>
+        <label>
+          Status
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            <option value="All">All</option>
+            {statuses.map((statusOption) => (
+              <option key={statusOption} value={statusOption}>
+                {statusOption}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <div className="table-wrapper">
         <table>
           <thead>
@@ -311,7 +350,7 @@ function Dashboard() {
             </tr>
           </thead>
           <tbody>
-            {jobs.map((job) => (
+            {visibleJobs.map((job) => (
               <tr key={job.id}>
                 <td>{job.company}</td>
                 <td>{job.role}</td>
