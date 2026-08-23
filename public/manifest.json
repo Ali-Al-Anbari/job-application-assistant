@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Job Application Assistant",
   "version": "0.1.0",
-  "permissions": ["storage"],
+  "permissions": ["storage", "activeTab", "scripting"],
   "action": {
     "default_popup": "index.html"
   }

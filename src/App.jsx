@@ -1,20 +1,130 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from './assets/vite.svg'
 import heroImg from './assets/hero.png'
+import { extractJobFromPage } from './extractJobFromPage.js'
 import './App.css'
+
+function getDescriptionPreview(description) {
+  if (typeof Intl.Segmenter === 'function') {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' })
+    const sentences = Array.from(segmenter.segment(description), ({ segment }) => segment)
+
+    return {
+      text: sentences.slice(0, 2).join('').trim(),
+      hasMore: sentences.length > 2,
+    }
+  }
+
+  const sentences = description.match(/.*?(?:[.!?](?=\s|$)|$)/g)?.filter(Boolean) || []
+  return {
+    text: sentences.slice(0, 2).join('').trim() || description,
+    hasMore: sentences.length > 2,
+  }
+}
 
 function App() {
   const [count, setCount] = useState(0)
+  const [extraction, setExtraction] = useState({ loading: true, job: null, error: '' })
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
   const openDashboard = () => {
     window.chrome.tabs.create({
       url: window.chrome.runtime.getURL('dashboard.html'),
     })
   }
 
+  useEffect(() => {
+    async function extractFromActiveTab() {
+      try {
+        const [tab] = await window.chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        })
+
+        if (!tab?.id || !tab.url || /^(chrome|edge|about|devtools):/.test(tab.url)) {
+          throw new Error('This page cannot be inspected.')
+        }
+
+        const [result] = await window.chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: extractJobFromPage,
+        })
+
+        setExtraction({ loading: false, job: result?.result || null, error: '' })
+        setIsDescriptionExpanded(false)
+      } catch {
+        setExtraction({
+          loading: false,
+          job: null,
+          error: 'Unable to extract job details from this page.',
+        })
+        setIsDescriptionExpanded(false)
+      }
+    }
+
+    extractFromActiveTab()
+  }, [])
+
   return (
     <>
       <section id="center">
+        <section className="extraction-panel" aria-live="polite">
+          <h2>Current Job Posting</h2>
+          {extraction.loading && <p>Reading this page...</p>}
+          {extraction.error && <p className="extraction-error">{extraction.error}</p>}
+          {extraction.job && (
+            <dl>
+              <div>
+                <dt>Role</dt>
+                <dd>{extraction.job.role || 'Not found'}</dd>
+              </div>
+              <div>
+                <dt>Company</dt>
+                <dd>{extraction.job.company || 'Not found'}</dd>
+              </div>
+              <div>
+                <dt>Location</dt>
+                <dd>{extraction.job.location || 'Not found'}</dd>
+              </div>
+              <div>
+                <dt>Description</dt>
+                <dd>
+                  {extraction.job.jobDescription ? (
+                    (() => {
+                      const descriptionPreview = getDescriptionPreview(
+                        extraction.job.jobDescription,
+                      )
+                      return (
+                        <>
+                          {isDescriptionExpanded
+                            ? extraction.job.jobDescription
+                            : descriptionPreview.text}
+                          {descriptionPreview.hasMore && (
+                            <button
+                              type="button"
+                              className="description-toggle"
+                              onClick={() =>
+                                setIsDescriptionExpanded((expanded) => !expanded)
+                              }
+                            >
+                              {isDescriptionExpanded ? 'Show less' : 'Show more'}
+                            </button>
+                          )}
+                        </>
+                      )
+                    })()
+                  ) : (
+                    'Not found'
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>URL</dt>
+                <dd>{extraction.job.url || 'Not found'}</dd>
+              </div>
+            </dl>
+          )}
+        </section>
         <div className="hero">
           <img src={heroImg} className="base" width="170" height="179" alt="" />
           <img src={reactLogo} className="framework" alt="React logo" />

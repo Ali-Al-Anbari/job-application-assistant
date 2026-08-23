@@ -17,6 +17,56 @@
   }
 }
 
+.extraction-panel {
+  width: min(100%, 520px);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--social-bg);
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.extraction-panel h2 {
+  margin-top: 0;
+}
+
+.extraction-panel dl {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.extraction-panel dt {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.extraction-panel dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--text-h);
+  font-size: 14px;
+}
+
+.description-toggle {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.extraction-error {
+  color: #b42318;
+}
+
 .hero {
   position: relative;
 

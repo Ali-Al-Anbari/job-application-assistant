@@ -173,3 +173,28 @@ Made the location search handle missing values safely.
 - Status filtering works
 - Search and status filtering work together
 - Lint and build passed
+
+---
+
+## Job Page Extraction
+
+### Task
+Extract job information directly from the current webpage.
+
+### AI Usage
+Copilot helped design and implement JSON-LD extraction and a LinkedIn-specific fallback.
+
+### What I changed
+The original generic LinkedIn selectors were unreliable. I inspected LinkedIn's DOM using DevTools and found the selected job pane using the current job ID and its closest `lazy-column` container.
+
+### Decision
+Use this extraction priority:
+1. JobPosting JSON-LD
+2. LinkedIn-specific extraction
+3. Generic fallback
+
+### Testing
+- Structured job page extracted correctly
+- LinkedIn extracted role, company, location, description, and clean URL
+- Description formatting and location cleanup were improved
+- Lint and build passed
