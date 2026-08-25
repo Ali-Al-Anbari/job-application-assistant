@@ -242,6 +242,51 @@ button {
   font-size: 12px;
 }
 
+.gmail-body {
+  display: grid;
+  gap: 7px;
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dashboard-border);
+}
+
+.gmail-body-label {
+  color: var(--dashboard-text);
+  font-size: 12px;
+}
+
+.gmail-body-text {
+  max-height: 180px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--dashboard-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.gmail-body-text.expanded {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.gmail-body-toggle {
+  width: fit-content;
+  padding: 0;
+  color: var(--dashboard-accent);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gmail-body-message {
+  color: var(--dashboard-muted);
+  font-size: 12px;
+}
+
 .gmail-message select {
   padding: 7px 9px;
   border: 1px solid var(--dashboard-border);

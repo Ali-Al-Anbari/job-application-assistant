@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
+  buildSuggestion,
+  getMessageBody,
   getJobById,
   getProcessedMessageIds,
   markMessageProcessed,
@@ -76,6 +78,12 @@ const statuses = [
   'Withdrawn',
 ]
 
+const gmailReadonlyScope = 'https://www.googleapis.com/auth/gmail.readonly'
+
+function devLog(...args) {
+  console.debug(...args)
+}
+
 function EditIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -114,6 +122,15 @@ function Dashboard() {
   const [gmailSuggestions, setGmailSuggestions] = useState([])
   const [undoState, setUndoState] = useState(null)
   const [pendingAddSuggestion, setPendingAddSuggestion] = useState(null)
+  const [gmailBody, setGmailBody] = useState({
+    messageId: '',
+    status: 'idle',
+    text: '',
+    truncated: false,
+    error: '',
+  })
+  const [isEmailExpanded, setIsEmailExpanded] = useState(false)
+  const bodyFetchRef = useRef('')
 
 
   useEffect(() => {
@@ -124,8 +141,13 @@ function Dashboard() {
       })
 
       const token = authResult?.token || authResult
+      const grantedScopes = authResult?.grantedScopes
 
-      if (!token) {
+      devLog('[Gmail] cached auth scopes', grantedScopes || [])
+      if (!token || !Array.isArray(grantedScopes) || !grantedScopes.includes(gmailReadonlyScope)) {
+        if (token) {
+          await window.chrome.identity.removeCachedAuthToken({ token }).catch(() => {})
+        }
         return
       }
 
@@ -181,15 +203,157 @@ function Dashboard() {
     loadJobs()
   }, [])
 
+  useEffect(() => {
+    const suggestion = gmailSuggestions[0]
+
+    devLog('[Gmail] body effect entered', {
+      suggestionId: suggestion?.id || '',
+      classification: suggestion?.classification || '',
+    })
+    if (!suggestion) {
+      devLog('[Gmail] body effect early return', { reason: 'no current suggestion' })
+      return
+    }
+    if (!jobs) {
+      devLog('[Gmail] body effect early return', { reason: 'jobs not loaded', suggestionId: suggestion.id })
+      return
+    }
+    if (bodyFetchRef.current === suggestion.id) {
+    devLog('[Gmail] body fetch guard', {
+      suggestionId: suggestion.id,
+      alreadyRequested: true
+    })
+
+    return
+  }
+
+  devLog('[Gmail] body fetch guard', {
+    suggestionId: suggestion.id,
+    alreadyRequested: false
+  })
+
+  bodyFetchRef.current = suggestion.id
+
+  let cancelled = false
+
+    async function loadBody() {
+      devLog('[Gmail] body state set', { suggestionId: suggestion.id, status: 'loading' })
+      setGmailBody({
+        messageId: suggestion.id,
+        status: 'loading',
+        text: '',
+        truncated: false,
+        error: '',
+      })
+      try {
+        const authResult = await window.chrome.identity.getAuthToken({ interactive: false })
+        const token = authResult?.token || authResult
+        const grantedScopes = authResult?.grantedScopes
+        devLog('[Gmail] body auth scopes', grantedScopes || [])
+
+        if (!token || !Array.isArray(grantedScopes) || !grantedScopes.includes(gmailReadonlyScope)) {
+          const error = new Error('Gmail needs to be reconnected with read-only email access.')
+          error.requiresScope = true
+          error.token = token
+          throw error
+        }
+
+        devLog('[Gmail] getMessageBody called', { suggestionId: suggestion.id })
+        const bodyResult = await getMessageBody(token, suggestion.id)
+        console.log('DASHBOARD: BODY RESULT RECEIVED', {
+          status: bodyResult?.status,
+          textLength: bodyResult?.text?.length ?? 0,
+        })
+        if (cancelled) {
+          console.log('DASHBOARD: BODY RESULT IGNORED', { reason: 'effect cleanup cancelled request' })
+          return
+        }
+
+        console.log('DASHBOARD: RECLASSIFY START', {
+          before: suggestion.classification,
+          bodyLength: bodyResult?.text?.length ?? 0,
+        })
+        const enrichedSuggestion = buildSuggestion({ ...suggestion, bodyText: bodyResult.text }, jobs)
+        console.log('DASHBOARD: RECLASSIFY RESULT', {
+          after: enrichedSuggestion.classification,
+        })
+        console.log('DASHBOARD: SETTING BODY LOADED')
+        devLog('[Gmail] reclassification', {
+          suggestionId: suggestion.id,
+          before: suggestion.classification,
+          after: enrichedSuggestion.classification,
+        })
+        setGmailBody({
+          messageId: suggestion.id,
+          status: bodyResult.text ? 'loaded' : 'unavailable',
+          text: bodyResult.text,
+          truncated: bodyResult.truncated,
+          error: bodyResult.text ? '' : 'Email body unavailable',
+        })
+        devLog('[Gmail] body state updated', {
+          suggestionId: suggestion.id,
+          status: bodyResult.text ? 'loaded' : 'unavailable',
+          textLength: bodyResult.text.length,
+          truncated: bodyResult.truncated,
+        })
+        setGmailSuggestions((suggestions) => suggestions.map((item) =>
+          item.id === suggestion.id
+            ? { ...enrichedSuggestion, selectedJobId: item.selectedJobId || enrichedSuggestion.jobId }
+            : item,
+        ))
+      } catch (error) {
+        if (cancelled) return
+        devLog('[Gmail] getMessageBody failed', {
+          suggestionId: suggestion.id,
+          message: error.message || 'Unknown error',
+        })
+        const bodyError = error.requiresScope
+          ? 'Gmail needs to be reconnected with read-only email access.'
+          : error.message || 'Unable to read the email body.'
+        setGmailBody({
+          messageId: suggestion.id,
+          status: 'error',
+          text: '',
+          truncated: false,
+          error: bodyError,
+        })
+        devLog('[Gmail] body state updated', { suggestionId: suggestion.id, status: 'error' })
+        if (error.status === 401 || error.requiresScope) {
+          const tokenToRemove = error.token
+          if (tokenToRemove) {
+            await window.chrome.identity.removeCachedAuthToken({ token: tokenToRemove }).catch(() => {})
+          }
+          setGmailState({
+            status: 'disconnected',
+            email: '',
+            error: error.requiresScope
+              ? 'Gmail needs to be reconnected with read-only email access.'
+              : 'Gmail authentication expired.',
+          })
+        }
+      }
+    }
+
+    loadBody()
+    return () => {
+      cancelled = true
+    }
+  }, [gmailSuggestions, jobs])
+
   async function connectGmail() {
     setGmailState({ status: 'connecting', email: '', error: '' })
 
     try {
       const authResult = await window.chrome.identity.getAuthToken({ interactive: true })
       const token = authResult?.token || authResult
+      const grantedScopes = authResult?.grantedScopes
 
-      if (!token) {
-        throw new Error('Authentication was cancelled.')
+      devLog('[Gmail] interactive auth scopes', grantedScopes || [])
+      if (!token || !Array.isArray(grantedScopes) || !grantedScopes.includes(gmailReadonlyScope)) {
+        if (token) {
+          await window.chrome.identity.removeCachedAuthToken({ token }).catch(() => {})
+        }
+        throw new Error('Gmail needs to be reconnected with read-only email access.')
       }
 
       const response = await fetch(
@@ -227,14 +391,20 @@ function Dashboard() {
 
   async function checkGmail() {
     setGmailScan({ status: 'checking', messages: [], error: '' })
+    setGmailBody({ messageId: '', status: 'idle', text: '', truncated: false, error: '' })
+    setIsEmailExpanded(false)
     let token
 
     try {
       const authResult = await window.chrome.identity.getAuthToken({ interactive: false })
       token = authResult?.token || authResult
+      const grantedScopes = authResult?.grantedScopes
 
-      if (!token) {
-        throw new Error('Gmail is not connected.')
+      devLog('[Gmail] scan auth scopes', grantedScopes || [])
+      if (!token || !Array.isArray(grantedScopes) || !grantedScopes.includes(gmailReadonlyScope)) {
+        const error = new Error('Gmail needs to be reconnected with read-only email access.')
+        error.requiresScope = true
+        throw error
       }
 
       const processedIds = await getProcessedMessageIds()
@@ -245,9 +415,17 @@ function Dashboard() {
       })))
       setGmailScan({ status: 'success', messages: suggestions, error: '' })
     } catch (error) {
-      if (error.status === 401) {
-        await window.chrome.identity.removeCachedAuthToken({ token })
-        setGmailState({ status: 'disconnected', email: '', error: 'Gmail authentication expired.' })
+      if (error.status === 401 || error.requiresScope) {
+        if (token) {
+          await window.chrome.identity.removeCachedAuthToken({ token })
+        }
+        setGmailState({
+          status: 'disconnected',
+          email: '',
+          error: error.requiresScope
+            ? 'Gmail needs to be reconnected with read-only email access.'
+            : 'Gmail authentication expired.',
+        })
       }
       setGmailScan({
         status: 'error',
@@ -259,11 +437,13 @@ function Dashboard() {
 
   function ignoreSuggestion(messageId) {
     markMessageProcessed(messageId).then(() => {
+      setIsEmailExpanded(false)
       setGmailSuggestions((suggestions) => suggestions.filter((suggestion) => suggestion.id !== messageId))
     })
   }
 
   function skipSuggestion(messageId) {
+    setIsEmailExpanded(false)
     setGmailSuggestions((suggestions) => suggestions.filter((suggestion) => suggestion.id !== messageId))
   }
 
@@ -323,6 +503,7 @@ function Dashboard() {
     await markMessageProcessed(suggestion.id)
     setJobs(updatedJobs)
     setUndoState({ job: previousJob, suggestion })
+    setIsEmailExpanded(false)
     setGmailSuggestions((suggestions) => suggestions.filter((item) => item.id !== suggestion.id))
   }
 
@@ -341,6 +522,9 @@ function Dashboard() {
       undoState.suggestion,
       ...suggestions,
     ])
+    bodyFetchRef.current = ''
+    setGmailBody({ messageId: '', status: 'idle', text: '', truncated: false, error: '' })
+    setIsEmailExpanded(false)
     setUndoState(null)
   }
 
@@ -579,6 +763,28 @@ function Dashboard() {
                   {message.classification !== 'Unknown' && message.statusSuppressed && (
                     <span className="gmail-status-note">Suggested update is not a forward status change.</span>
                   )}
+                  <div className="gmail-body">
+                    <strong className="gmail-body-label">Email body</strong>
+                    {gmailBody.messageId !== message.id || gmailBody.status === 'loading' ? (
+                      <span className="gmail-body-message">{gmailBody.status === 'loading' ? 'Loading email body...' : 'Email body unavailable'}</span>
+                    ) : gmailBody.text ? (
+                      <>
+                        <p className={isEmailExpanded ? 'gmail-body-text expanded' : 'gmail-body-text'}>
+                          {gmailBody.text}
+                        </p>
+                        {(gmailBody.text.split('\n').length > 8 || gmailBody.text.length > 500 || gmailBody.truncated) && (
+                          <button type="button" className="gmail-body-toggle" onClick={() => setIsEmailExpanded((expanded) => !expanded)}>
+                            {isEmailExpanded ? 'Show less' : 'Show more'}
+                          </button>
+                        )}
+                        {gmailBody.truncated && isEmailExpanded && (
+                          <span className="gmail-body-message">Only part of this email is displayed.</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="gmail-body-message">{gmailBody.error || 'Email body unavailable'}</span>
+                    )}
+                  </div>
                   {message.classification !== 'Unknown' &&
                     (message.confidence === 'ambiguous' || !message.jobId) && (
                     <select

@@ -389,3 +389,106 @@ Confirmed Ignore permanently removes the email from future review.
 Confirmed Confirm Update changes only the selected application.
 Confirmed Undo restores the previous application state and returns the email to the current review queue.
 Confirmed refreshing the dashboard clears the temporary Undo option.
+
+---
+
+## Gmail Email Body Reading
+
+### Task
+
+Expand the Gmail integration so the dashboard can read the actual body of a likely application email and use that information to improve application-status classification and job matching.
+
+### AI Usage
+
+AI helped plan the Gmail OAuth scope change, MIME email parsing, safe body decoding, lazy email-body loading, classification improvements, and debugging of the body-loading pipeline.
+
+### Changes
+
+- Changed the Gmail OAuth scope from gmail.metadata to gmail.readonly so the extension can read message bodies.
+- Kept Gmail access read-only and did not request permission to modify, delete, or send emails.
+- Continued using metadata-only scanning first so full email bodies are not fetched for every recent email.
+- Added lazy body loading so the full email is fetched only for the currently reviewed Gmail suggestion.
+- Added support for Gmail multipart MIME messages.
+- Added recursive MIME traversal for nested message parts.
+- Preferred text/plain email content when available.
+- Added a safe text/html fallback that converts HTML email content into readable plain text.
+- Did not render arbitrary email HTML directly.
+- Added Gmail base64url decoding and UTF-8 decoding using TextDecoder.
+- Ignored attachment parts and did not retrieve email attachments.
+- Kept full email bodies in React state only and did not save them to chrome.storage.local.
+- Updated deterministic email classification to use the email body as additional evidence.
+- Updated job matching so body text can provide additional company and role evidence.
+- Added a readable email-body section to the Gmail review card.
+- Added Show more and Show less controls for long emails.
+- Preserved the existing Confirm Update, Ignore, Skip for now, Add Application, processed-message, and Undo workflows.
+
+### Issue Found
+
+The first email-body implementation successfully identified likely application emails, but the dashboard remained stuck on "Loading email body..." and the classification stayed Unknown.
+A real rejection test email from Epic contained:
+"We've decided to move forward with other candidates"
+The rejection classifier correctly returned Rejected when tested directly, which showed that the classification rules themselves were working.
+The Gmail API request was then traced through the live Chrome extension using temporary development logs.
+The debugging process confirmed that:
+
+- The Gmail suggestion existed and had a valid message ID.
+- The React body-loading effect executed.
+- The duplicate-fetch guard passed correctly for the initial request.
+- getMessageBody() was called.
+- The Gmail full-message request returned HTTP 200.
+- Gmail returned a multipart/alternative payload.
+- JSON parsing succeeded.
+- MIME extraction succeeded.
+- 485 characters of email body text were successfully decoded.
+- The body result successfully returned from gmail.js into Dashboard.jsx.
+However, execution stopped after Dashboard.jsx received the body result and before the suggestion was reclassified or the body state was changed from loading.
+This isolated the problem to the Dashboard body-processing flow rather than OAuth, Gmail permissions, the Gmail API, MIME parsing, decoding, or classification.
+
+### Fix
+
+The Gmail body-loading pipeline was traced one checkpoint at a time instead of continuing to make speculative changes.
+
+Temporary logs were added around:
+
+- the React body-loading effect
+- the fetch guard
+- getMessageBody()
+- the Gmail HTTP request
+- response.json()
+- MIME extraction
+- extracted text length
+- the return from gmail.js
+- Dashboard receipt of the body result
+- reclassification
+- the final loaded body state.
+
+This confirmed that the Gmail API and MIME parser were working correctly and narrowed the remaining failure to the code immediately after Dashboard.jsx received the successful body result.
+The post-response Dashboard logic was corrected so the returned body text continues into:
+
+1. suggestion reclassification
+2. job matching
+3. gmailBody loaded state
+4. React rendering
+
+After the fix, the real Epic test email loaded correctly and changed from Unknown to Rejected based on the message body.
+The temporary debugging logs were removed after verification.
+
+### Testing
+
+Confirmed Gmail reconnects with the gmail.readonly permission.
+Confirmed metadata scanning still runs before body access.
+Confirmed only the currently reviewed email body is fetched.
+Confirmed Gmail full-message requests return successfully.
+Confirmed multipart/alternative email bodies are parsed correctly.
+Confirmed plain-text email content can be decoded and displayed.
+Confirmed full email bodies are not stored in chrome.storage.local.
+Confirmed attachment parts are not downloaded.
+Confirmed the Epic rejection test email loads its full body.
+Confirmed the Epic rejection email changes from Unknown to Rejected after the body is analyzed.
+Confirmed long emails can be expanded with Show more and collapsed with Show less.
+Confirmed Confirm Update still works.
+Confirmed Ignore still works.
+Confirmed Skip for now still works.
+Confirmed processed emails remain excluded from later Gmail checks.
+Confirmed Undo still restores the previous application state.
+Confirmed lint and build pass.
