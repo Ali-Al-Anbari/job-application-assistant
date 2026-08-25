@@ -329,3 +329,63 @@ Confirmed individual message failures do not stop the entire scan.
 Confirmed Gmail message data is not saved to chrome.storage.local.
 Confirmed checking Gmail does not modify existing applications.
 Confirmed the Gmail connection information and Check Gmail button display correctly together.
+
+---
+
+## Gmail Application Review Workflow
+
+### Task
+
+Improve the Gmail workflow so application emails can be reviewed one at a time, acted on safely, and not repeatedly shown after they have already been handled.
+
+### AI Usage
+
+AI helped redesign the Gmail review flow, simplify the status-update rules, identify persistence issues with repeated emails, and plan a safer confirmation and undo process.
+
+### Changes
+
+- Removed the strict status progression rule so confirmed updates can move between statuses in either direction.
+- Allowed updates such as Interview to Assessment when the user explicitly confirms the change.
+- Added an Add Application option for unmatched Application Received emails.
+- Reused the existing application form instead of creating a separate job-creation flow.
+- Added automatic dateApplied handling for newly added Applied jobs when no date is provided.
+- Fixed the dashboard add/edit flow so the calculated dateApplied value is actually saved.
+- Added processed Gmail message ID storage so handled emails do not appear again on later Gmail checks.
+- Stored only Gmail message IDs and did not persist email subjects, senders, bodies, or classifications.
+- Added a Skip for now option that removes an email from the current review queue without permanently marking it as handled.
+- Changed the Gmail review area to show one email suggestion at a time instead of displaying every suggestion at once.
+- Added Ignore behavior that permanently marks the current Gmail message as handled.
+- Added Confirm Update behavior that updates the selected job and permanently marks the email as handled.
+- Added a temporary Undo option for the most recent confirmed update.
+- Kept Undo state in React only so it disappears when the page is refreshed.
+- Restored the previous job data and Gmail suggestion when Undo is used.
+
+### Issue Found
+
+Handled Gmail messages were appearing again every time Check Gmail was clicked because suggestion state only existed in memory.
+The dashboard also became crowded when several Gmail suggestions were displayed at the same time.
+The existing status-order protection was too restrictive because real hiring processes do not always follow a fixed progression.
+The manual Add Application flow also calculated a default application date but did not always save that calculated value.
+
+### Fix
+
+Persisted only processed Gmail message IDs in chrome.storage.local and filtered those messages out during future Gmail scans.
+Changed the Gmail suggestion interface into a one-at-a-time review queue with Confirm Update, Skip for now, and Ignore actions.
+Removed the strict status-ranking restriction and relied on explicit user confirmation before changing a tracked job.
+Updated the application submit flow to use the calculated dateApplied value when creating or editing an application.
+Added temporary Undo state that restores the previous job data, removes the Gmail message from processed IDs, and returns the suggestion to the review queue.
+
+### Testing
+
+Confirmed Interview to Assessment updates can be manually approved.
+Confirmed Assessment to Interview updates can be manually approved.
+Confirmed unmatched Application Received emails can open the Add Application flow.
+Confirmed newly created Applied applications receive an application date when no date is entered.
+Confirmed existing application dates are not overwritten.
+Confirmed handled Gmail messages do not return on later scans.
+Confirmed Skip for now advances to the next email without permanently hiding the skipped message.
+Confirmed only one Gmail suggestion is displayed at a time.
+Confirmed Ignore permanently removes the email from future review.
+Confirmed Confirm Update changes only the selected application.
+Confirmed Undo restores the previous application state and returns the email to the current review queue.
+Confirmed refreshing the dashboard clears the temporary Undo option.

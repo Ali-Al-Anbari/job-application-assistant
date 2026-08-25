@@ -212,6 +212,98 @@ button {
   white-space: nowrap;
 }
 
+.gmail-queue-count {
+  color: var(--dashboard-accent) !important;
+  font-size: 11px !important;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gmail-classification,
+.gmail-match,
+.gmail-status-change,
+.gmail-status-note,
+.gmail-message select,
+.gmail-suggestion-actions {
+  grid-column: 1 / -1;
+}
+
+.gmail-classification {
+  color: #e4c5ff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gmail-match,
+.gmail-status-change,
+.gmail-status-note {
+  color: var(--dashboard-muted);
+  font-size: 12px;
+}
+
+.gmail-message select {
+  padding: 7px 9px;
+  border: 1px solid var(--dashboard-border);
+  border-radius: 5px;
+  color: var(--dashboard-text);
+  background: var(--dashboard-bg);
+  font-size: 12px;
+}
+
+.gmail-suggestion-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.gmail-suggestion-actions button {
+  padding: 7px 10px;
+  border-radius: 5px;
+  color: #180d24;
+  background: var(--dashboard-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gmail-suggestion-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.gmail-suggestion-actions .secondary-button {
+  color: var(--dashboard-text);
+  background: transparent;
+  border: 1px solid var(--dashboard-border);
+}
+
+.gmail-suggestion-actions .skip-button {
+  color: var(--dashboard-text);
+  background: transparent;
+  border: 1px solid var(--dashboard-border);
+}
+
+.gmail-undo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  margin: 0 0 18px auto;
+  padding: 8px 10px;
+  border: 1px solid var(--dashboard-border);
+  border-radius: 5px;
+  color: var(--dashboard-muted);
+  background: var(--dashboard-surface);
+  font-size: 12px;
+}
+
+.gmail-undo button {
+  padding: 0;
+  color: var(--dashboard-accent);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .application-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

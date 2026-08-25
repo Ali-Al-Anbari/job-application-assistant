@@ -1,4 +1,11 @@
 import { useEffect, useState } from 'react'
+import {
+  getJobById,
+  getProcessedMessageIds,
+  markMessageProcessed,
+  scanGmail,
+  unmarkMessageProcessed,
+} from './gmail.js'
 import { appendJob } from './jobStorage.js'
 import './dashboard.css'
 
@@ -69,24 +76,6 @@ const statuses = [
   'Withdrawn',
 ]
 
-const gmailSignals = [
-  'application',
-  'applied',
-  'candidate',
-  'recruiting',
-  'recruiter',
-  'interview',
-  'assessment',
-  'coding challenge',
-  'next steps',
-  'position',
-  'opportunity',
-  'offer',
-  'unfortunately',
-  'moving forward',
-  'thank you for applying',
-]
-
 function EditIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -122,6 +111,9 @@ function Dashboard() {
   const [selectedNote, setSelectedNote] = useState(null)
   const [gmailState, setGmailState] = useState({ status: 'disconnected', email: '', error: '' })
   const [gmailScan, setGmailScan] = useState({ status: 'idle', messages: [], error: '' })
+  const [gmailSuggestions, setGmailSuggestions] = useState([])
+  const [undoState, setUndoState] = useState(null)
+  const [pendingAddSuggestion, setPendingAddSuggestion] = useState(null)
 
 
   useEffect(() => {
@@ -235,93 +227,121 @@ function Dashboard() {
 
   async function checkGmail() {
     setGmailScan({ status: 'checking', messages: [], error: '' })
+    let token
 
     try {
       const authResult = await window.chrome.identity.getAuthToken({ interactive: false })
-      const token = authResult?.token || authResult
+      token = authResult?.token || authResult
 
       if (!token) {
         throw new Error('Gmail is not connected.')
       }
 
-      const listResponse = await fetch(
-        'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15',
-        { headers: { Authorization: `Bearer ${token}` } },
-      )
-
-      if (listResponse.status === 401) {
-        await window.chrome.identity.removeCachedAuthToken({ token })
-        setGmailState({ status: 'disconnected', email: '', error: 'Gmail authentication expired.' })
-        throw new Error('Gmail authentication expired.')
-      }
-
-      if (!listResponse.ok) {
-        throw new Error('Unable to list Gmail messages.')
-      }
-
-      const messageList = await listResponse.json()
-      const messages = messageList.messages ?? []
-      const metadataResults = await Promise.allSettled(
-        messages.map(async (message) => {
-          const params = new URLSearchParams({ format: 'metadata' })
-          params.append('metadataHeaders', 'Subject')
-          params.append('metadataHeaders', 'From')
-          params.append('metadataHeaders', 'Date')
-
-          const response = await fetch(
-            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}?${params}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-          )
-
-          if (!response.ok) {
-            const error = new Error('Unable to read message metadata.')
-            error.status = response.status
-            throw error
-          }
-
-          return response.json()
-        }),
-      )
-
-      const unauthorized = metadataResults.some(
-        (result) => result.status === 'rejected' && result.reason?.status === 401,
-      )
-      if (unauthorized) {
-        await window.chrome.identity.removeCachedAuthToken({ token })
-        setGmailState({ status: 'disconnected', email: '', error: 'Gmail authentication expired.' })
-        throw new Error('Gmail authentication expired.')
-      }
-
-      const likelyMessages = metadataResults
-        .filter((result) => result.status === 'fulfilled')
-        .map((result) => result.value)
-        .map((message) => {
-          const headers = message.payload?.headers ?? []
-          const getHeader = (name) =>
-            headers.find((header) => header.name?.toLowerCase() === name.toLowerCase())?.value?.trim() || ''
-          const subject = getHeader('Subject')
-          const from = getHeader('From')
-          const searchableText = `${subject} ${from}`.toLowerCase()
-
-          return {
-            id: message.id,
-            threadId: message.threadId,
-            subject,
-            from,
-            internalDate: message.internalDate,
-            likelyJobRelated: gmailSignals.some((signal) => searchableText.includes(signal)),
-          }
-        })
-        .filter((message) => message.likelyJobRelated)
-
-      setGmailScan({ status: 'success', messages: likelyMessages, error: '' })
+      const processedIds = await getProcessedMessageIds()
+      const suggestions = await scanGmail(token, jobs, processedIds)
+      setGmailSuggestions(suggestions.map((suggestion) => ({
+        ...suggestion,
+        selectedJobId: suggestion.jobId,
+      })))
+      setGmailScan({ status: 'success', messages: suggestions, error: '' })
     } catch (error) {
+      if (error.status === 401) {
+        await window.chrome.identity.removeCachedAuthToken({ token })
+        setGmailState({ status: 'disconnected', email: '', error: 'Gmail authentication expired.' })
+      }
       setGmailScan({
         status: 'error',
         messages: [],
         error: error.message || 'Unable to check Gmail.',
       })
     }
+  }
+
+  function ignoreSuggestion(messageId) {
+    markMessageProcessed(messageId).then(() => {
+      setGmailSuggestions((suggestions) => suggestions.filter((suggestion) => suggestion.id !== messageId))
+    })
+  }
+
+  function skipSuggestion(messageId) {
+    setGmailSuggestions((suggestions) => suggestions.filter((suggestion) => suggestion.id !== messageId))
+  }
+
+  function selectSuggestionJob(messageId, jobId) {
+    setGmailSuggestions((suggestions) =>
+      suggestions.map((suggestion) =>
+        suggestion.id === messageId ? { ...suggestion, selectedJobId: jobId } : suggestion,
+      ),
+    )
+  }
+
+  function startAddFromSuggestion(suggestion) {
+    setPendingAddSuggestion(suggestion)
+    setEditingJobId(null)
+    setFormData({
+      ...emptyJobForm,
+      company: suggestion.inferredCompany,
+      role: suggestion.inferredRole,
+      status: 'Applied',
+      dateApplied: suggestion.emailDate || new Date().toLocaleDateString('en-CA'),
+    })
+    setFormError('')
+    setIsFormOpen(true)
+  }
+
+  async function confirmSuggestion(suggestion) {
+    const jobId = suggestion.selectedJobId
+    const job = getJobById(jobs, jobId)
+    const suggestedStatus = suggestion.suggestedStatus
+
+    if (!job || !suggestedStatus) {
+      return
+    }
+
+    if (job.status === suggestedStatus) {
+      return
+    }
+
+    const previousJob = { ...job }
+    const updatedJobs = jobs.map((currentJob) =>
+      currentJob.id === job.id
+        ? {
+            ...currentJob,
+            status: suggestedStatus,
+            dateApplied:
+              currentJob.dateApplied ||
+              (suggestion.classification === 'Application Received'
+                ? suggestion.internalDate
+                  ? new Date(Number(suggestion.internalDate)).toLocaleDateString('en-CA')
+                  : new Date().toLocaleDateString('en-CA')
+                : ''),
+          }
+        : currentJob,
+    )
+
+    await window.chrome.storage.local.set({ jobs: updatedJobs })
+    await markMessageProcessed(suggestion.id)
+    setJobs(updatedJobs)
+    setUndoState({ job: previousJob, suggestion })
+    setGmailSuggestions((suggestions) => suggestions.filter((item) => item.id !== suggestion.id))
+  }
+
+  async function handleUndoUpdate() {
+    if (!undoState) {
+      return
+    }
+
+    const restoredJobs = jobs.map((job) =>
+      job.id === undoState.job.id ? undoState.job : job,
+    )
+    await window.chrome.storage.local.set({ jobs: restoredJobs })
+    await unmarkMessageProcessed(undoState.suggestion.id)
+    setJobs(restoredJobs)
+    setGmailSuggestions((suggestions) => [
+      undoState.suggestion,
+      ...suggestions,
+    ])
+    setUndoState(null)
   }
 
   useEffect(() => {
@@ -385,11 +405,16 @@ function Dashboard() {
         role,
         location: formData.location.trim(),
         status,
-        dateApplied: formData.dateApplied,
+        dateApplied,
         url: formData.url.trim(),
         notes: formData.notes.trim(),
         jobDescription: '',
       })
+      if (pendingAddSuggestion) {
+        await markMessageProcessed(pendingAddSuggestion.id)
+        setGmailSuggestions((suggestions) => suggestions.filter((suggestion) => suggestion.id !== pendingAddSuggestion.id))
+        setPendingAddSuggestion(null)
+      }
     }
 
     if (editingJobId) {
@@ -512,13 +537,16 @@ function Dashboard() {
           <h2>Recent application emails</h2>
           {gmailScan.status === 'checking' && <p>Checking Gmail...</p>}
           {gmailScan.status === 'error' && <p className="gmail-error">{gmailScan.error}</p>}
-          {gmailScan.status === 'success' && gmailScan.messages.length === 0 && (
-            <p>No likely application emails found in the recent messages checked.</p>
+          {gmailSuggestions.length === 0 && gmailScan.status === 'success' && (
+            <p>No more application emails to review.</p>
           )}
-          {gmailScan.messages.length > 0 && (
+          {gmailSuggestions.length > 0 && (
             <div className="gmail-message-list">
-              {gmailScan.messages.map((message) => (
+              {(() => {
+                const message = gmailSuggestions[0]
+                return (
                 <article key={message.id} className="gmail-message">
+                  <span className="gmail-queue-count">Email 1 of {gmailSuggestions.length}</span>
                   <strong>{message.from || 'Unknown sender'}</strong>
                   <span>{message.subject || '(No subject)'}</span>
                   <time dateTime={message.internalDate ? new Date(Number(message.internalDate)).toISOString() : undefined}>
@@ -526,11 +554,80 @@ function Dashboard() {
                       ? new Date(Number(message.internalDate)).toLocaleDateString()
                       : 'Unknown date'}
                   </time>
+                  <span className="gmail-classification">
+                    Likely update: {message.classification} ({message.confidence} match)
+                  </span>
+                  {message.classification === 'Unknown' && (
+                    <span className="gmail-status-note">
+                      Not enough information to suggest an application update.
+                    </span>
+                  )}
+                  {message.classification !== 'Unknown' && (
+                    <span className="gmail-match">
+                      {message.confidence === 'ambiguous'
+                        ? 'Multiple applications may match'
+                        : message.jobId
+                          ? `Matched: ${getJobById(jobs, message.jobId)?.company} - ${getJobById(jobs, message.jobId)?.role}`
+                          : 'No matching application'}
+                    </span>
+                  )}
+                  {message.classification !== 'Unknown' && message.currentStatus && message.suggestedStatus && (
+                    <span className="gmail-status-change">
+                      Current status: {message.currentStatus} | Suggested status: {message.suggestedStatus}
+                    </span>
+                  )}
+                  {message.classification !== 'Unknown' && message.statusSuppressed && (
+                    <span className="gmail-status-note">Suggested update is not a forward status change.</span>
+                  )}
+                  {message.classification !== 'Unknown' &&
+                    (message.confidence === 'ambiguous' || !message.jobId) && (
+                    <select
+                      value={message.selectedJobId || ''}
+                      onChange={(event) => selectSuggestionJob(message.id, event.target.value)}
+                    >
+                      <option value="">Select an application</option>
+                      {jobs.map((job) => (
+                        <option key={job.id} value={job.id}>
+                          {job.company} - {job.role}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div className="gmail-suggestion-actions">
+                    {message.classification !== 'Unknown' && (
+                      <button
+                        type="button"
+                        onClick={() => confirmSuggestion(message)}
+                        disabled={!message.suggestedStatus || !message.selectedJobId || message.statusSuppressed || getJobById(jobs, message.selectedJobId)?.status === message.suggestedStatus}
+                      >
+                        Confirm Update
+                      </button>
+                    )}
+                    {message.classification === 'Application Received' && message.confidence === 'none' && (
+                      <button type="button" onClick={() => startAddFromSuggestion(message)}>
+                        Add Application
+                      </button>
+                    )}
+                    <button type="button" className="skip-button" onClick={() => skipSuggestion(message.id)}>
+                      Skip for now
+                    </button>
+                    <button type="button" className="secondary-button" onClick={() => ignoreSuggestion(message.id)}>
+                      Ignore
+                    </button>
+                  </div>
                 </article>
-              ))}
+                )
+              })()}
             </div>
           )}
         </section>
+      )}
+
+      {undoState && (
+        <div className="gmail-undo">
+          Application updated.
+          <button type="button" onClick={handleUndoUpdate}>Undo</button>
+        </div>
       )}
 
       {isFormOpen && (
