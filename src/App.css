@@ -31,6 +31,18 @@ body {
   font-size: 13px;
 }
 
+.not-job-state {
+  display: grid;
+  gap: 6px;
+  margin: 24px 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.not-job-state p {
+  margin: 0;
+}
+
 .popup-application-form {
   display: grid;
   gap: 14px;

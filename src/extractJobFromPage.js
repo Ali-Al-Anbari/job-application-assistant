@@ -104,34 +104,35 @@ export function extractJobFromPage() {
     return parts.join(', ')
   }
 
-  function findJobPosting(value) {
+  function findSchemaData(value, schemaTypes = new Set()) {
     if (!value || typeof value !== 'object') {
-      return null
+      return { jobPosting: null, schemaTypes }
     }
 
     if (Array.isArray(value)) {
       for (const item of value) {
-        const jobPosting = findJobPosting(item)
-        if (jobPosting) {
-          return jobPosting
+        const result = findSchemaData(item, schemaTypes)
+        if (result.jobPosting) {
+          return result
         }
       }
-      return null
+      return { jobPosting: null, schemaTypes }
     }
 
     const types = Array.isArray(value['@type']) ? value['@type'] : [value['@type']]
+    types.filter((type) => typeof type === 'string').forEach((type) => schemaTypes.add(type.toLowerCase()))
     if (types.some((type) => type?.toLowerCase() === 'jobposting')) {
-      return value
+      return { jobPosting: value, schemaTypes }
     }
 
     for (const nestedValue of Object.values(value)) {
-      const jobPosting = findJobPosting(nestedValue)
-      if (jobPosting) {
-        return jobPosting
+      const result = findSchemaData(nestedValue, schemaTypes)
+      if (result.jobPosting) {
+        return result
       }
     }
 
-    return null
+    return { jobPosting: null, schemaTypes }
   }
 
   function getTextElement(root, text) {
@@ -168,18 +169,144 @@ export function extractJobFromPage() {
     return toPlainText(content.innerHTML)
   }
 
+  function normalizeForMatching(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9']+/g, ' ').trim()
+  }
+
+  function hasExactPhrase(text, phrase) {
+    const normalizedText = normalizeForMatching(text)
+    const normalizedPhrase = normalizeForMatching(phrase).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`(?:^|\\s)${normalizedPhrase}(?=\\s|$)`, 'i').test(normalizedText)
+  }
+
+  function isVisible(element) {
+    const style = window.getComputedStyle(element)
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0
+  }
+
+  function getCandidateJobRegion() {
+    const anchorPhrases = [
+      'apply',
+      'apply now',
+      'apply for this job',
+      'job description',
+      'about the role',
+      'about the job',
+      'responsibilities',
+      'qualifications',
+      'requirements',
+    ]
+    const elements = Array.from(document.querySelectorAll('button, a, input[type="submit"], h1, h2, h3, h4, h5, h6'))
+    const anchor = elements.find((element) => {
+      if (!isVisible(element)) return false
+      const text = normalizeForMatching(element.innerText || element.value || element.textContent)
+      return anchorPhrases.some((phrase) => text === phrase)
+    })
+
+    if (!anchor) return null
+
+    let container = anchor.parentElement
+    while (container && container !== document.body) {
+      if (/^(ARTICLE|SECTION|MAIN)$/.test(container.tagName) || container.getAttribute('role') === 'main') {
+        if ((container.innerText || '').trim().length >= 240) return container
+      }
+      container = container.parentElement
+    }
+
+    return anchor.closest('article, section, main, [role="main"]') || anchor.parentElement
+  }
+
+  function getGenericRole(region) {
+    const headings = Array.from((region || document).querySelectorAll('h1, h2, h3'))
+      .map((heading) => heading.innerText?.trim() || '')
+      .filter(Boolean)
+    return headings[0] || document.querySelector('h1')?.innerText?.trim() || getMetaContent('meta[property="og:title"]')
+  }
+
+  function hasBelievableRole(role) {
+    const normalizedRole = normalizeForMatching(role)
+    if (!normalizedRole || normalizedRole.length > 120) return false
+    if (/^(home|search|careers?|jobs?|products?|about|documentation|messages|inbox|login|sign in)$/i.test(normalizedRole)) return false
+    const words = normalizedRole.split(' ')
+    const roleWords = /\b(engineer|developer|designer|manager|analyst|scientist|recruiter|coordinator|specialist|consultant|architect|administrator|assistant|associate|officer|representative|technician|director|lead|intern|executive|counsel|nurse|teacher|writer|editor|sales|marketing|finance|operations|product)\b/i
+    return words.length > 1 || roleWords.test(normalizedRole)
+  }
+
+  function getGenericValidation(role, region, regionText, pageText, hasNonJobSchema) {
+    const contentGroups = [
+      ['job description', 'about the role', 'about the job', 'responsibilities', "what you'll do", 'what you will do'],
+      ['qualifications', 'requirements', 'required qualifications', 'preferred qualifications', 'who you are'],
+      ['employment type', 'full-time', 'part-time', 'compensation', 'salary', 'pay range'],
+      ['department'],
+    ]
+    const normalizedRegionText = normalizeForMatching(regionText)
+    const matchingGroups = contentGroups.filter((signals) => signals.some((signal) => hasExactPhrase(normalizedRegionText, signal)))
+    const actionRoot = region || document.createElement('div')
+    const hasActionSignal = Array.from(actionRoot.querySelectorAll('button, a, input[type="submit"]')).some((element) => {
+      if (!isVisible(element)) return false
+      const text = normalizeForMatching(element.innerText || element.value || element.textContent)
+      return ['apply', 'apply now', 'apply for this job', 'submit application', 'submit your application'].includes(text)
+    })
+    const hasIdentitySignal = ['job id', 'req id', 'requisition id', 'employment type'].some((signal) => hasExactPhrase(normalizedRegionText, signal))
+      || ['job id', 'req id', 'requisition id', 'employment type'].some((signal) => hasExactPhrase(pageText, signal))
+    const hasApplicationSignal = hasActionSignal || hasIdentitySignal
+    const hasSubstantialDescription = regionText.trim().length >= 240
+    const hasBelievableTitle = hasBelievableRole(role)
+    const passes = !hasNonJobSchema && hasBelievableTitle && hasSubstantialDescription && hasApplicationSignal && matchingGroups.length >= 2
+
+    return {
+      source: 'generic',
+      hasBelievableTitle,
+      hasSubstantialDescription,
+      hasApplicationSignal,
+      signalGroups: matchingGroups.length,
+      nonJobSchemaTypes: hasNonJobSchema.types,
+      hasCandidateRegion: Boolean(regionText),
+      passed: passes,
+    }
+  }
+
   let jobPosting = null
+  const schemaTypes = new Set()
   const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]')
 
   for (const script of jsonLdScripts) {
     try {
-      jobPosting = findJobPosting(JSON.parse(script.textContent || ''))
+      const schemaData = findSchemaData(JSON.parse(script.textContent || ''), schemaTypes)
+      jobPosting = schemaData.jobPosting
     } catch {
       continue
     }
 
-    if (jobPosting) {
-      break
+    if (jobPosting) break
+  }
+
+  const nonJobSchemaNames = new Set(['softwareapplication', 'mobileapplication', 'product', 'article', 'newsarticle', 'recipe', 'videoobject'])
+  const nonJobSchemaTypes = Array.from(schemaTypes).filter((type) => nonJobSchemaNames.has(type))
+  const hasNonJobSchema = { types: nonJobSchemaTypes }
+
+  function getGenericDescription() {
+    const region = getCandidateJobRegion()
+    return {
+      region,
+      text: region?.innerText?.trim() || '',
+    }
+  }
+
+  function getGenericJob() {
+    const genericContent = getGenericDescription()
+    const pageText = document.body.innerText?.trim() || ''
+    const role = getGenericRole(genericContent.region)
+    const validation = getGenericValidation(role, genericContent.region, genericContent.text, pageText, hasNonJobSchema)
+    return {
+      job: {
+        role,
+        company: '',
+        location: '',
+        jobDescription: genericContent.text,
+        url: document.querySelector('link[rel="canonical"]')?.href || window.location.href,
+      },
+      validation,
     }
   }
 
@@ -200,6 +327,7 @@ export function extractJobFromPage() {
     ? `https://www.linkedin.com/jobs/view/${encodeURIComponent(currentJobId)}`
     : ''
   let linkedinJob = {}
+  let hasVerifiedLinkedInJob = false
 
   if (isLinkedIn && currentJobId) {
     const selectedJobAnchor = document.querySelector(
@@ -208,6 +336,7 @@ export function extractJobFromPage() {
     const selectedJobPane = selectedJobAnchor?.closest('[data-testid="lazy-column"]')
 
     if (selectedJobAnchor && selectedJobPane) {
+      hasVerifiedLinkedInJob = true
       const headerLine = selectedJobPane.innerText
         .split('\n')
         .map((line) => line.trim())
@@ -232,28 +361,28 @@ export function extractJobFromPage() {
     }
   }
 
-  const genericJob = {
-    role:
-      getMetaContent('meta[property="og:title"]') ||
-      document.querySelector('h1')?.textContent?.trim() ||
-      document.title.trim(),
-    company: '',
-    location: '',
-    jobDescription: toPlainText(
-      getMetaContent('meta[property="og:description"]') ||
-        getMetaContent('meta[name="description"]'),
-    ),
-    url: document.querySelector('link[rel="canonical"]')?.href || window.location.href,
-  }
+  const genericResult = getGenericJob()
+  const genericJob = genericResult.job
 
-  const normalizedUrl = linkedinJobUrl || structuredJob.url || linkedinJob.url || genericJob.url
-
-  return {
+  const job = {
     role: structuredJob.role || linkedinJob.role || genericJob.role,
     company: structuredJob.company || linkedinJob.company || genericJob.company,
     location: structuredJob.location || linkedinJob.location || genericJob.location,
     jobDescription:
       structuredJob.jobDescription || linkedinJob.jobDescription || genericJob.jobDescription,
-    url: normalizedUrl,
+    url: linkedinJobUrl || structuredJob.url || linkedinJob.url || genericJob.url,
+  }
+  const hasStructuredJob = Boolean(jobPosting)
+  const isGenericJob = !hasStructuredJob && !hasVerifiedLinkedInJob && genericResult.validation.passed
+
+  return {
+    isJobPosting: hasStructuredJob || hasVerifiedLinkedInJob || isGenericJob,
+    confidence: hasStructuredJob || hasVerifiedLinkedInJob ? 'high' : isGenericJob ? 'medium' : 'low',
+    job,
+    validation: hasStructuredJob
+      ? { source: 'structured', nonJobSchemaTypes: [] }
+      : hasVerifiedLinkedInJob
+        ? { source: 'linkedin', passed: true, nonJobSchemaTypes: nonJobSchemaTypes }
+        : genericResult.validation,
   }
 }

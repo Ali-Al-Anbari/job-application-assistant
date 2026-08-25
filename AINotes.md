@@ -492,3 +492,82 @@ Confirmed Skip for now still works.
 Confirmed processed emails remain excluded from later Gmail checks.
 Confirmed Undo still restores the previous application state.
 Confirmed lint and build pass.
+
+---
+
+## Final UX and Reliability Polish
+
+### Task
+
+Complete the final stabilization and polish pass for the Job Application Assistant before ending feature development.
+
+### AI Usage
+
+AI helped review the completed application for usability issues, extraction false positives, dashboard editing problems, Gmail workflow improvements, accessibility, error handling, and final code cleanup.
+
+### Changes
+
+Removed the original sample-job seeding behavior so a fresh installation starts with zero applications.
+Added a dedicated empty dashboard state for users who have not saved any applications yet.
+Preserved existing saved applications without overwriting or resetting chrome.storage.local.
+Changed application editing from the separate form at the top of the dashboard to seamless inline row editing.
+Kept Add Application as a separate workflow while allowing existing applications to be edited directly inside their table row.
+Fixed the Date Applied field being clipped during inline editing by giving the date column sufficient usable width.
+Improved table sizing so inline inputs, status controls, notes, dates, and action icons remain usable.
+Strengthened generic webpage validation so normal webpages are not incorrectly treated as job postings.
+Added explicit job-page confidence and validation logic.
+Continued treating Schema.org JobPosting data as high-confidence job evidence.
+Continued treating verified LinkedIn job-detail pages as high-confidence job evidence.
+Made generic extraction require a believable role, substantial job content, a strong hiring/application signal, and evidence from multiple job-content groups.
+Added structured-data negative evidence so pages identified as products, software applications, articles, and other clearly non-job content are rejected when no JobPosting schema exists.
+Changed generic extraction to focus on a plausible job-content region instead of using the entire webpage as the job description.
+Prevented normal pages such as ChatGPT, Gmail, product pages, search pages, and articles from displaying fake job information or the Save Application interface.
+Added a compact non-job popup state explaining that the current page does not appear to be a job posting.
+Improved dashboard empty, loading, and error states.
+Added scoped async guards to prevent duplicate application saves and updates.
+Improved keyboard focus and accessibility behavior for icon-only controls.
+Removed temporary Gmail debugging logs used during development.
+Added an Open in Gmail action to the Gmail review card.
+Used the Gmail thread ID to open the original conversation in Gmail without changing the message or application state.
+Kept the Gmail link visually secondary and reused the existing external-link icon style.
+
+### Issue Found
+
+The final testing pass exposed several usability and reliability issues.
+The dashboard originally seeded sample applications on a fresh installation, which made the project behave like a demo instead of a real application.
+Editing an existing application opened the full edit form near the top of the dashboard, forcing the user away from the row they were working with.
+The Date Applied control was partially clipped because the fixed table layout did not reserve enough usable width for the native date input and its picker control.
+The largest reliability issue was that the popup's generic webpage fallback was still capable of treating unrelated webpages as job postings.
+For example, product and application pages could provide a title, long visible text, and incidental words such as location, experience, or benefits. The old generic validator could combine those weak signals and incorrectly allow the Save Application workflow.
+This meant pages such as the Apple App Store, ChatGPT, Gmail, and other normal webpages could occasionally produce fake role, description, or company information.
+
+### Fix
+
+Removed sample-job initialization and changed a missing jobs storage key to behave as an empty array without immediately writing anything to storage.
+Replaced the dashboard's top-form editing workflow with inline row editing so the user remains in context while modifying an application.
+Adjusted table sizing and minimum widths so the Date Applied control and other edit fields remain fully visible.
+Redesigned generic job-page validation around strong evidence of an actual hiring workflow instead of broad keyword matching.
+Generic pages now require a believable role title, a substantial job-content region, at least one strong hiring or application signal, evidence from multiple distinct job-content groups, and no strong structured-data evidence that the page represents clearly non-job content.
+The validator now uses semantic Apply actions, job-section structure, structured data, and localized job-content regions instead of allowing page-wide text and metadata alone to qualify a page.
+The popup now checks the extractor's isJobPosting result before displaying any editable job information or Save Application controls.
+Added Open in Gmail using the existing Gmail thread ID and a direct Gmail web link without adding permissions, API calls, or storage.
+
+### Testing
+
+Confirmed a fresh installation starts with zero applications.
+Confirmed existing saved applications are preserved.
+Confirmed Add Application still works.
+Confirmed applications can be edited directly in their existing table rows.
+Confirmed cancelling an inline edit preserves the original application.
+Confirmed the Date Applied input is fully visible during editing.
+Confirmed long locations, notes, and table actions remain usable.
+Confirmed ChatGPT is rejected as a non-job page.
+Confirmed Gmail is rejected as a non-job page.
+Confirmed Apple App Store pages are rejected as non-job pages.
+Confirmed Google Search and ordinary article pages are rejected.
+Confirmed Ashby job postings continue to extract correctly.
+Confirmed LinkedIn job postings continue to extract correctly.
+Confirmed generic job postings with sufficient hiring evidence are accepted.
+Confirmed real job pages can still be accepted when optional fields such as location are missing.
+Confirmed Gmail connection, email review, body reading, classification, matching, Confirm Update, Ignore, Skip for now, Add Application, and Undo continue to work.
+Confirmed Open in Gmail opens the corresponding Gmail conversation in a new tab.

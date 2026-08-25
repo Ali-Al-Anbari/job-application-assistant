@@ -11,53 +11,6 @@ import {
 import { appendJob } from './jobStorage.js'
 import './dashboard.css'
 
-const sampleJobs = [
-  {
-    id: 'job-1',
-    company: 'Northstar Labs',
-    role: 'Frontend Developer',
-    location: 'Remote',
-    status: 'Applied',
-    dateApplied: '2026-08-15',
-    url: 'https://example.com/jobs/northstar-frontend',
-    notes: 'Follow up next week.',
-    jobDescription: 'Build and maintain frontend product experiences.',
-  },
-  {
-    id: 'job-2',
-    company: 'Brightside Systems',
-    role: 'Product Designer',
-    location: 'New York, NY',
-    status: 'Interview',
-    dateApplied: '2026-08-10',
-    url: 'https://example.com/jobs/brightside-product-designer',
-    notes: 'Prepare portfolio walkthrough.',
-    jobDescription: 'Design clear workflows for business software.',
-  },
-  {
-    id: 'job-3',
-    company: 'Oak & Pine',
-    role: 'Software Engineer',
-    location: 'Austin, TX',
-    status: 'Saved',
-    dateApplied: '',
-    url: 'https://example.com/jobs/oak-pine-engineer',
-    notes: 'Review role requirements before applying.',
-    jobDescription: 'Develop reliable services for a growing platform.',
-  },
-  {
-    id: 'job-4',
-    company: 'Atlas Finance',
-    role: 'Data Analyst',
-    location: 'Chicago, IL',
-    status: 'Assessment',
-    dateApplied: '2026-08-05',
-    url: 'https://example.com/jobs/atlas-data-analyst',
-    notes: 'Complete the take-home assessment.',
-    jobDescription: 'Turn product and business data into useful insights.',
-  },
-]
-
 const emptyJobForm = {
   company: '',
   role: '',
@@ -80,10 +33,6 @@ const statuses = [
 
 const gmailReadonlyScope = 'https://www.googleapis.com/auth/gmail.readonly'
 
-function devLog(...args) {
-  console.debug(...args)
-}
-
 function EditIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -100,6 +49,22 @@ function DeleteIcon() {
   )
 }
 
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m5 12 4.5 4.5L19 7" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  )
+}
+
 function ExternalLinkIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -111,9 +76,12 @@ function ExternalLinkIcon() {
 function Dashboard() {
   const [jobs, setJobs] = useState(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingJobId, setEditingJobId] = useState(null)
+  const [isSavingApplication, setIsSavingApplication] = useState(false)
+  const [editingRow, setEditingRow] = useState(null)
+  const [isSavingRow, setIsSavingRow] = useState(false)
   const [formData, setFormData] = useState(emptyJobForm)
   const [formError, setFormError] = useState('')
+  const [actionError, setActionError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [selectedNote, setSelectedNote] = useState(null)
@@ -121,6 +89,9 @@ function Dashboard() {
   const [gmailScan, setGmailScan] = useState({ status: 'idle', messages: [], error: '' })
   const [gmailSuggestions, setGmailSuggestions] = useState([])
   const [undoState, setUndoState] = useState(null)
+  const [isUndoing, setIsUndoing] = useState(false)
+  const [updatingMessageId, setUpdatingMessageId] = useState('')
+  const [deletingJobId, setDeletingJobId] = useState('')
   const [pendingAddSuggestion, setPendingAddSuggestion] = useState(null)
   const [gmailBody, setGmailBody] = useState({
     messageId: '',
@@ -143,7 +114,6 @@ function Dashboard() {
       const token = authResult?.token || authResult
       const grantedScopes = authResult?.grantedScopes
 
-      devLog('[Gmail] cached auth scopes', grantedScopes || [])
       if (!token || !Array.isArray(grantedScopes) || !grantedScopes.includes(gmailReadonlyScope)) {
         if (token) {
           await window.chrome.identity.removeCachedAuthToken({ token }).catch(() => {})
@@ -189,15 +159,8 @@ function Dashboard() {
   useEffect(() => {
     async function loadJobs() {
       const stored = await window.chrome.storage.local.get('jobs')
-      const hasJobsKey = Object.prototype.hasOwnProperty.call(stored, 'jobs')
-
-      if (!hasJobsKey) {
-        await window.chrome.storage.local.set({ jobs: sampleJobs })
-        setJobs(sampleJobs)
-        return
-      }
-
-      setJobs(stored.jobs ?? [])
+      const storedJobs = stored.jobs ?? []
+      setJobs(storedJobs)
     }
 
     loadJobs()
@@ -206,38 +169,16 @@ function Dashboard() {
   useEffect(() => {
     const suggestion = gmailSuggestions[0]
 
-    devLog('[Gmail] body effect entered', {
-      suggestionId: suggestion?.id || '',
-      classification: suggestion?.classification || '',
-    })
-    if (!suggestion) {
-      devLog('[Gmail] body effect early return', { reason: 'no current suggestion' })
-      return
-    }
-    if (!jobs) {
-      devLog('[Gmail] body effect early return', { reason: 'jobs not loaded', suggestionId: suggestion.id })
-      return
-    }
+    if (!suggestion || !jobs) return
     if (bodyFetchRef.current === suggestion.id) {
-    devLog('[Gmail] body fetch guard', {
-      suggestionId: suggestion.id,
-      alreadyRequested: true
-    })
-
     return
   }
-
-  devLog('[Gmail] body fetch guard', {
-    suggestionId: suggestion.id,
-    alreadyRequested: false
-  })
 
   bodyFetchRef.current = suggestion.id
 
   let cancelled = false
 
     async function loadBody() {
-      devLog('[Gmail] body state set', { suggestionId: suggestion.id, status: 'loading' })
       setGmailBody({
         messageId: suggestion.id,
         status: 'loading',
@@ -249,7 +190,6 @@ function Dashboard() {
         const authResult = await window.chrome.identity.getAuthToken({ interactive: false })
         const token = authResult?.token || authResult
         const grantedScopes = authResult?.grantedScopes
-        devLog('[Gmail] body auth scopes', grantedScopes || [])
 
         if (!token || !Array.isArray(grantedScopes) || !grantedScopes.includes(gmailReadonlyScope)) {
           const error = new Error('Gmail needs to be reconnected with read-only email access.')
@@ -258,43 +198,15 @@ function Dashboard() {
           throw error
         }
 
-        devLog('[Gmail] getMessageBody called', { suggestionId: suggestion.id })
         const bodyResult = await getMessageBody(token, suggestion.id)
-        console.log('DASHBOARD: BODY RESULT RECEIVED', {
-          status: bodyResult?.status,
-          textLength: bodyResult?.text?.length ?? 0,
-        })
-        if (cancelled) {
-          console.log('DASHBOARD: BODY RESULT IGNORED', { reason: 'effect cleanup cancelled request' })
-          return
-        }
-
-        console.log('DASHBOARD: RECLASSIFY START', {
-          before: suggestion.classification,
-          bodyLength: bodyResult?.text?.length ?? 0,
-        })
+        if (cancelled) return
         const enrichedSuggestion = buildSuggestion({ ...suggestion, bodyText: bodyResult.text }, jobs)
-        console.log('DASHBOARD: RECLASSIFY RESULT', {
-          after: enrichedSuggestion.classification,
-        })
-        console.log('DASHBOARD: SETTING BODY LOADED')
-        devLog('[Gmail] reclassification', {
-          suggestionId: suggestion.id,
-          before: suggestion.classification,
-          after: enrichedSuggestion.classification,
-        })
         setGmailBody({
           messageId: suggestion.id,
           status: bodyResult.text ? 'loaded' : 'unavailable',
           text: bodyResult.text,
           truncated: bodyResult.truncated,
           error: bodyResult.text ? '' : 'Email body unavailable',
-        })
-        devLog('[Gmail] body state updated', {
-          suggestionId: suggestion.id,
-          status: bodyResult.text ? 'loaded' : 'unavailable',
-          textLength: bodyResult.text.length,
-          truncated: bodyResult.truncated,
         })
         setGmailSuggestions((suggestions) => suggestions.map((item) =>
           item.id === suggestion.id
@@ -303,13 +215,9 @@ function Dashboard() {
         ))
       } catch (error) {
         if (cancelled) return
-        devLog('[Gmail] getMessageBody failed', {
-          suggestionId: suggestion.id,
-          message: error.message || 'Unknown error',
-        })
         const bodyError = error.requiresScope
           ? 'Gmail needs to be reconnected with read-only email access.'
-          : error.message || 'Unable to read the email body.'
+          : 'Email body unavailable. Try again.'
         setGmailBody({
           messageId: suggestion.id,
           status: 'error',
@@ -317,7 +225,6 @@ function Dashboard() {
           truncated: false,
           error: bodyError,
         })
-        devLog('[Gmail] body state updated', { suggestionId: suggestion.id, status: 'error' })
         if (error.status === 401 || error.requiresScope) {
           const tokenToRemove = error.token
           if (tokenToRemove) {
@@ -348,7 +255,6 @@ function Dashboard() {
       const token = authResult?.token || authResult
       const grantedScopes = authResult?.grantedScopes
 
-      devLog('[Gmail] interactive auth scopes', grantedScopes || [])
       if (!token || !Array.isArray(grantedScopes) || !grantedScopes.includes(gmailReadonlyScope)) {
         if (token) {
           await window.chrome.identity.removeCachedAuthToken({ token }).catch(() => {})
@@ -380,11 +286,11 @@ function Dashboard() {
         email: profile.emailAddress || '',
         error: '',
       })
-    } catch (error) {
+    } catch {
       setGmailState({
         status: 'disconnected',
         email: '',
-        error: error.message || 'Unable to connect Gmail.',
+        error: 'Unable to connect Gmail right now.',
       })
     }
   }
@@ -400,7 +306,6 @@ function Dashboard() {
       token = authResult?.token || authResult
       const grantedScopes = authResult?.grantedScopes
 
-      devLog('[Gmail] scan auth scopes', grantedScopes || [])
       if (!token || !Array.isArray(grantedScopes) || !grantedScopes.includes(gmailReadonlyScope)) {
         const error = new Error('Gmail needs to be reconnected with read-only email access.')
         error.requiresScope = true
@@ -430,7 +335,7 @@ function Dashboard() {
       setGmailScan({
         status: 'error',
         messages: [],
-        error: error.message || 'Unable to check Gmail.',
+        error: 'Unable to check Gmail right now.',
       })
     }
   }
@@ -457,7 +362,6 @@ function Dashboard() {
 
   function startAddFromSuggestion(suggestion) {
     setPendingAddSuggestion(suggestion)
-    setEditingJobId(null)
     setFormData({
       ...emptyJobForm,
       company: suggestion.inferredCompany,
@@ -470,6 +374,9 @@ function Dashboard() {
   }
 
   async function confirmSuggestion(suggestion) {
+    if (updatingMessageId) {
+      return
+    }
     const jobId = suggestion.selectedJobId
     const job = getJobById(jobs, jobId)
     const suggestedStatus = suggestion.suggestedStatus
@@ -499,33 +406,49 @@ function Dashboard() {
         : currentJob,
     )
 
-    await window.chrome.storage.local.set({ jobs: updatedJobs })
-    await markMessageProcessed(suggestion.id)
-    setJobs(updatedJobs)
-    setUndoState({ job: previousJob, suggestion })
-    setIsEmailExpanded(false)
-    setGmailSuggestions((suggestions) => suggestions.filter((item) => item.id !== suggestion.id))
+    setUpdatingMessageId(suggestion.id)
+    setActionError('')
+    try {
+      await window.chrome.storage.local.set({ jobs: updatedJobs })
+      await markMessageProcessed(suggestion.id)
+      setJobs(updatedJobs)
+      setUndoState({ job: previousJob, suggestion })
+      setIsEmailExpanded(false)
+      setGmailSuggestions((suggestions) => suggestions.filter((item) => item.id !== suggestion.id))
+    } catch {
+      setActionError('Unable to update application. Try again.')
+    } finally {
+      setUpdatingMessageId('')
+    }
   }
 
   async function handleUndoUpdate() {
-    if (!undoState) {
+    if (!undoState || isUndoing) {
       return
     }
 
-    const restoredJobs = jobs.map((job) =>
-      job.id === undoState.job.id ? undoState.job : job,
-    )
-    await window.chrome.storage.local.set({ jobs: restoredJobs })
-    await unmarkMessageProcessed(undoState.suggestion.id)
-    setJobs(restoredJobs)
-    setGmailSuggestions((suggestions) => [
-      undoState.suggestion,
-      ...suggestions,
-    ])
-    bodyFetchRef.current = ''
-    setGmailBody({ messageId: '', status: 'idle', text: '', truncated: false, error: '' })
-    setIsEmailExpanded(false)
-    setUndoState(null)
+    setIsUndoing(true)
+    setActionError('')
+    try {
+      const restoredJobs = jobs.map((job) =>
+        job.id === undoState.job.id ? undoState.job : job,
+      )
+      await window.chrome.storage.local.set({ jobs: restoredJobs })
+      await unmarkMessageProcessed(undoState.suggestion.id)
+      setJobs(restoredJobs)
+      setGmailSuggestions((suggestions) => [
+        undoState.suggestion,
+        ...suggestions,
+      ])
+      bodyFetchRef.current = ''
+      setGmailBody({ messageId: '', status: 'idle', text: '', truncated: false, error: '' })
+      setIsEmailExpanded(false)
+      setUndoState(null)
+    } catch {
+      setActionError('Unable to undo application update. Try again.')
+    } finally {
+      setIsUndoing(false)
+    }
   }
 
   useEffect(() => {
@@ -549,6 +472,7 @@ function Dashboard() {
 
   async function handleSubmit(event) {
     event.preventDefault()
+    if (isSavingApplication) return
 
     const company = formData.company.trim()
     const role = formData.role.trim()
@@ -563,27 +487,10 @@ function Dashboard() {
       return
     }
 
-    const stored = await window.chrome.storage.local.get('jobs')
-    const storedJobs = stored.jobs ?? []
-    let updatedJobs
-
-    if (editingJobId) {
-      updatedJobs = storedJobs.map((job) =>
-        job.id === editingJobId
-          ? {
-              ...job,
-              company,
-              role,
-              location: formData.location.trim(),
-              status,
-              dateApplied,
-              url: formData.url.trim(),
-              notes: formData.notes.trim(),
-            }
-          : job,
-      )
-    } else {
-      updatedJobs = await appendJob({
+    setIsSavingApplication(true)
+    setActionError('')
+    try {
+      const updatedJobs = await appendJob({
         id: window.crypto.randomUUID(),
         company,
         role,
@@ -599,48 +506,93 @@ function Dashboard() {
         setGmailSuggestions((suggestions) => suggestions.filter((suggestion) => suggestion.id !== pendingAddSuggestion.id))
         setPendingAddSuggestion(null)
       }
-    }
 
-    if (editingJobId) {
-      await window.chrome.storage.local.set({ jobs: updatedJobs })
+      setJobs(updatedJobs)
+      setFormData(emptyJobForm)
+      setFormError('')
+      setIsFormOpen(false)
+    } catch {
+      setFormError('Unable to save application. Try again.')
+    } finally {
+      setIsSavingApplication(false)
     }
-    setJobs(updatedJobs)
-    setFormData(emptyJobForm)
-    setFormError('')
-    setEditingJobId(null)
-    setIsFormOpen(false)
   }
 
-  function handleEdit(job) {
-    setEditingJobId(job.id)
-    setFormData({
-      company: job.company,
-      role: job.role,
-      location: job.location,
-      status: job.status,
-      dateApplied: job.dateApplied,
-      url: job.url,
-      notes: job.notes,
+  function startRowEdit(job) {
+    setEditingRow({
+      jobId: job.id,
+      draft: {
+        company: job.company,
+        role: job.role,
+        location: job.location,
+        status: job.status,
+        dateApplied: job.dateApplied,
+        notes: job.notes,
+      },
     })
-    setFormError('')
-    setIsFormOpen(true)
   }
 
-  function handleCancelEdit() {
-    setEditingJobId(null)
-    setFormData(emptyJobForm)
-    setFormError('')
-    setIsFormOpen(false)
+  function updateRowDraft(field, value) {
+    setEditingRow((current) => current ? {
+      ...current,
+      draft: { ...current.draft, [field]: value },
+    } : current)
+  }
+
+  async function saveRowEdit() {
+    if (!editingRow || isSavingRow) return
+    const { draft, jobId } = editingRow
+    const company = draft.company.trim()
+    const role = draft.role.trim()
+    if (!company || !role || !draft.status) return
+
+    const updatedJobs = jobs.map((job) => job.id === jobId
+      ? {
+          ...job,
+          company,
+          role,
+          location: draft.location.trim(),
+          status: draft.status,
+          dateApplied: draft.status !== 'Saved' && !draft.dateApplied
+            ? new Date().toLocaleDateString('en-CA')
+            : draft.dateApplied,
+          notes: draft.notes.trim(),
+        }
+      : job)
+    setIsSavingRow(true)
+    setActionError('')
+    try {
+      await window.chrome.storage.local.set({ jobs: updatedJobs })
+      setJobs(updatedJobs)
+      setEditingRow(null)
+    } catch {
+      setActionError('Unable to save application. Try again.')
+    } finally {
+      setIsSavingRow(false)
+    }
+  }
+
+  function cancelRowEdit() {
+    setEditingRow(null)
   }
 
   async function handleDelete(jobId) {
+    if (deletingJobId) return
     if (!window.confirm('Delete this application?')) {
       return
     }
 
-    const updatedJobs = jobs.filter((job) => job.id !== jobId)
-    await window.chrome.storage.local.set({ jobs: updatedJobs })
-    setJobs(updatedJobs)
+    setDeletingJobId(jobId)
+    setActionError('')
+    try {
+      const updatedJobs = jobs.filter((job) => job.id !== jobId)
+      await window.chrome.storage.local.set({ jobs: updatedJobs })
+      setJobs(updatedJobs)
+    } catch {
+      setActionError('Unable to delete application. Try again.')
+    } finally {
+      setDeletingJobId('')
+    }
   }
 
   if (jobs === null) {
@@ -705,13 +657,12 @@ function Dashboard() {
         <button
           type="button"
           onClick={() => {
-            setEditingJobId(null)
             setFormData(emptyJobForm)
             setFormError('')
             setIsFormOpen((open) => !open)
           }}
         >
-          {isFormOpen && !editingJobId ? 'Close' : 'Add Application'}
+          {isFormOpen ? 'Close' : 'Add Application'}
         </button>
       </div>
       </header>
@@ -722,7 +673,7 @@ function Dashboard() {
           {gmailScan.status === 'checking' && <p>Checking Gmail...</p>}
           {gmailScan.status === 'error' && <p className="gmail-error">{gmailScan.error}</p>}
           {gmailSuggestions.length === 0 && gmailScan.status === 'success' && (
-            <p>No more application emails to review.</p>
+            <p>No new application emails found.</p>
           )}
           {gmailSuggestions.length > 0 && (
             <div className="gmail-message-list">
@@ -733,6 +684,18 @@ function Dashboard() {
                   <span className="gmail-queue-count">Email 1 of {gmailSuggestions.length}</span>
                   <strong>{message.from || 'Unknown sender'}</strong>
                   <span>{message.subject || '(No subject)'}</span>
+                  {message.threadId && (
+                    <a
+                      className="icon-button gmail-open-link"
+                      href={`https://mail.google.com/mail/u/0/#all/${encodeURIComponent(message.threadId)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open email in Gmail"
+                      title="Open email in Gmail"
+                    >
+                      <ExternalLinkIcon />
+                    </a>
+                  )}
                   <time dateTime={message.internalDate ? new Date(Number(message.internalDate)).toISOString() : undefined}>
                     {message.internalDate
                       ? new Date(Number(message.internalDate)).toLocaleDateString()
@@ -804,9 +767,9 @@ function Dashboard() {
                       <button
                         type="button"
                         onClick={() => confirmSuggestion(message)}
-                        disabled={!message.suggestedStatus || !message.selectedJobId || message.statusSuppressed || getJobById(jobs, message.selectedJobId)?.status === message.suggestedStatus}
+                        disabled={Boolean(updatingMessageId) || !message.suggestedStatus || !message.selectedJobId || message.statusSuppressed || getJobById(jobs, message.selectedJobId)?.status === message.suggestedStatus}
                       >
-                        Confirm Update
+                        {updatingMessageId === message.id ? 'Updating...' : 'Confirm Update'}
                       </button>
                     )}
                     {message.classification === 'Application Received' && message.confidence === 'none' && (
@@ -832,13 +795,15 @@ function Dashboard() {
       {undoState && (
         <div className="gmail-undo">
           Application updated.
-          <button type="button" onClick={handleUndoUpdate}>Undo</button>
+          <button type="button" onClick={handleUndoUpdate} disabled={isUndoing}>{isUndoing ? 'Undoing...' : 'Undo'}</button>
         </div>
       )}
 
+      {actionError && <p className="form-error dashboard-action-error">{actionError}</p>}
+
       {isFormOpen && (
         <form className="application-form" onSubmit={handleSubmit}>
-          <h2>{editingJobId ? 'Edit Application' : 'Add Application'}</h2>
+          <h2>Add Application</h2>
           <label>
             Company *
             <input
@@ -910,14 +875,9 @@ function Dashboard() {
           </label>
           {formError && <p className="form-error">{formError}</p>}
           <div className="form-actions">
-            <button type="submit">
-              {editingJobId ? 'Save Changes' : 'Save Application'}
+            <button type="submit" disabled={isSavingApplication}>
+              {isSavingApplication ? 'Saving...' : 'Save Application'}
             </button>
-            {editingJobId && (
-              <button type="button" className="secondary-button" onClick={handleCancelEdit}>
-                Cancel
-              </button>
-            )}
           </div>
         </form>
       )}
@@ -950,7 +910,15 @@ function Dashboard() {
 
       <div className="table-wrapper">
         {visibleJobs.length === 0 ? (
-          <p className="empty-state">No applications match your filters.</p>
+          jobs.length === 0 ? (
+            <section className="empty-state" aria-labelledby="empty-dashboard-title">
+              <strong id="empty-dashboard-title">No applications yet</strong>
+              <p>Save a job from the extension or add one manually to get started.</p>
+              <button type="button" onClick={() => setIsFormOpen(true)}>Add Application</button>
+            </section>
+          ) : (
+            <p className="empty-state">No applications match your filters.</p>
+          )
         ) : (
           <table>
           <thead>
@@ -959,60 +927,89 @@ function Dashboard() {
               <th scope="col">Role</th>
               <th scope="col">Location</th>
               <th scope="col">Status</th>
-              <th scope="col">Date Applied</th>
+              <th scope="col" className="date-column">Date Applied</th>
               <th scope="col">Notes</th>
               <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {visibleJobs.map((job) => (
-              <tr key={job.id}>
-                <td className="company-cell">{job.company}</td>
-                <td className="role-cell">{job.role}</td>
-                <td className="location-cell">{job.location}</td>
-                <td>
-                  <span className="status" data-status={job.status}>
-                    {job.status}
-                  </span>
-                </td>
-                <td>{job.dateApplied || 'Not applied'}</td>
-                <td className="notes-cell">
-                  {job.notes ? (
-                    <button
-                      type="button"
-                      className="notes-preview"
-                      onClick={() => setSelectedNote(job)}
-                      title="View full note"
-                    >
-                      {job.notes}
-                    </button>
+            {visibleJobs.map((job) => {
+              const isEditing = editingRow?.jobId === job.id
+              const draft = isEditing ? editingRow.draft : null
+
+              return (
+                <tr key={job.id}>
+                  {isEditing ? (
+                    <>
+                      <td><input className="row-edit-input" value={draft.company} onChange={(event) => updateRowDraft('company', event.target.value)} aria-label="Company" /></td>
+                      <td><input className="row-edit-input" value={draft.role} onChange={(event) => updateRowDraft('role', event.target.value)} aria-label="Role" /></td>
+                      <td><input className="row-edit-input" value={draft.location} onChange={(event) => updateRowDraft('location', event.target.value)} aria-label="Location" /></td>
+                      <td>
+                        <select className="row-edit-input" value={draft.status} onChange={(event) => updateRowDraft('status', event.target.value)} aria-label="Status">
+                          {statuses.map((statusOption) => <option key={statusOption} value={statusOption}>{statusOption}</option>)}
+                        </select>
+                      </td>
+                      <td className="date-cell"><input className="row-edit-input" type="date" value={draft.dateApplied} onChange={(event) => updateRowDraft('dateApplied', event.target.value)} aria-label="Date Applied" /></td>
+                      <td className="notes-cell"><textarea className="row-edit-input row-edit-notes" value={draft.notes} onChange={(event) => updateRowDraft('notes', event.target.value)} rows="2" aria-label="Notes" /></td>
+                      <td className="actions-cell">
+                        <div className="actions-wrapper">
+                          <button type="button" className="icon-button confirm-icon" onClick={saveRowEdit} disabled={isSavingRow} aria-label="Save application changes" title="Save changes"><CheckIcon /></button>
+                          <button type="button" className="icon-button cancel-icon" onClick={cancelRowEdit} aria-label="Cancel application changes" title="Cancel changes"><CloseIcon /></button>
+                        </div>
+                      </td>
+                    </>
                   ) : (
-                    <span className="muted-placeholder">-</span>
+                    <>
+                      <td className="company-cell">{job.company}</td>
+                      <td className="role-cell">{job.role}</td>
+                      <td className="location-cell">{job.location}</td>
+                      <td>
+                        <span className="status" data-status={job.status}>
+                          {job.status}
+                        </span>
+                      </td>
+                      <td>{job.dateApplied || 'Not applied'}</td>
+                      <td className="notes-cell">
+                        {job.notes ? (
+                          <button
+                            type="button"
+                            className="notes-preview"
+                            onClick={() => setSelectedNote(job)}
+                            title="View full note"
+                          >
+                            {job.notes}
+                          </button>
+                        ) : (
+                          <span className="muted-placeholder">-</span>
+                        )}
+                      </td>
+                      <td className="actions-cell">
+                        <div className="actions-wrapper">
+                          {job.url && (
+                            <a className="icon-button" href={job.url} target="_blank" rel="noreferrer" aria-label={`Open ${job.company} posting`} title="Open original posting">
+                              <ExternalLinkIcon />
+                            </a>
+                          )}
+                          <button type="button" className="icon-button" onClick={() => startRowEdit(job)} aria-label={`Edit ${job.company}`} title="Edit application">
+                            <EditIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button danger-icon"
+                            onClick={() => handleDelete(job.id)}
+                            disabled={Boolean(deletingJobId)}
+                            aria-label={`Delete ${job.company}`}
+                            title="Delete application"
+                          >
+                            <DeleteIcon />
+                          </button>
+                        </div>
+                      </td>
+                    </>
                   )}
-                </td>
-                <td className="actions-cell">
-                  <div className="actions-wrapper">
-                    {job.url && (
-                      <a className="icon-button" href={job.url} target="_blank" rel="noreferrer" aria-label={`Open ${job.company} posting`} title="Open original posting">
-                        <ExternalLinkIcon />
-                      </a>
-                    )}
-                    <button type="button" className="icon-button" onClick={() => handleEdit(job)} aria-label={`Edit ${job.company}`} title="Edit application">
-                      <EditIcon />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button danger-icon"
-                      onClick={() => handleDelete(job.id)}
-                      aria-label={`Delete ${job.company}`}
-                      title="Delete application"
-                    >
-                      <DeleteIcon />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                </tr>
+              )
+            })}
           </tbody>
           </table>
         )}

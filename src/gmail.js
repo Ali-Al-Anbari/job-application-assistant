@@ -191,10 +191,6 @@ export async function unmarkMessageProcessed(messageId) {
 const MAX_BODY_LENGTH = 100000
 const BODY_REQUEST_TIMEOUT_MS = 15000
 
-function devLog(...args) {
-  if (import.meta.env.DEV) console.debug(...args)
-}
-
 function decodeBase64Url(value) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
   const padded = normalized.padEnd(normalized.length + ((4 - normalized.length % 4) % 4), '=')
@@ -237,10 +233,6 @@ function extractBodyText(payload) {
   const plainParts = []
   const htmlParts = []
 
-  devLog('[Gmail] body extraction started', {
-    payloadMimeType: payload?.mimeType || '',
-    topLevelPartCount: payload?.parts?.length || 0,
-  })
 
   function visit(part) {
     if (!part || isAttachmentPart(part)) return
@@ -263,10 +255,6 @@ function extractBodyText(payload) {
   const plainText = plainParts.join('\n\n').trim()
   const htmlText = htmlParts.map(htmlToPlainText).filter(Boolean).join('\n\n').trim()
   const text = plainText || htmlText
-  devLog('[Gmail] body extraction completed', {
-    textLength: text.length,
-    truncated: text.length > MAX_BODY_LENGTH,
-  })
   return {
     text: text.slice(0, MAX_BODY_LENGTH),
     truncated: text.length > MAX_BODY_LENGTH,
@@ -285,7 +273,6 @@ async function parseGmailError(response, fallback) {
   const error = new Error(message)
   error.status = response.status
   error.requiresScope = response.status === 403 && /insufficient|scope|permission denied/i.test(message)
-  devLog('[Gmail] API error', { status: error.status, message: error.message })
   return error
 }
 
@@ -294,45 +281,21 @@ export async function getMessageBody(token, messageId) {
   const timeoutId = setTimeout(() => controller.abort(), BODY_REQUEST_TIMEOUT_MS)
 
   try {
-    devLog('[Gmail] full message fetch starting', { messageId })
     const response = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
       { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal },
     )
-    devLog('[Gmail] full message fetch returned', { messageId, status: response.status })
-
-    devLog('[Gmail] body response', { status: response.status })
     if (!response.ok) {
       throw await parseGmailError(response, 'Unable to read the email body.')
     }
 
-    console.log('POST200: BEFORE JSON')
     const message = await response.json()
-    console.log('POST200: JSON PARSED', {
-      hasPayload: Boolean(message?.payload),
-      mimeType: message?.payload?.mimeType || '',
-      parts: message?.payload?.parts?.length ?? 0,
-    })
-    console.log('POST200: BEFORE EXTRACT')
     const extracted = extractBodyText(message.payload)
-    console.log('POST200: EXTRACT RESULT', {
-      textLength: extracted?.text?.length ?? 0,
-      truncated: Boolean(extracted?.truncated),
-    })
-    const result = { ...extracted, status: response.status }
-    console.log('POST200: RETURNING BODY RESULT', {
-      status: result.status,
-      textLength: result.text?.length ?? 0,
-    })
-    return result
+    return { ...extracted, status: response.status }
   } catch (error) {
     if (error.name === 'AbortError') {
       const timeoutError = new Error('The Gmail body request timed out.')
-      devLog('[Gmail] body request failed', { message: timeoutError.message })
       throw timeoutError
-    }
-    if (!error.status) {
-      devLog('[Gmail] body request failed', { message: error.message || 'Unknown error' })
     }
     if (error.status === 401) {
       error.token = token

@@ -117,7 +117,7 @@ function InlineEditField({ label, value, placeholder, onSave, multiline = false 
 }
 
 function App() {
-  const [extraction, setExtraction] = useState({ loading: true, job: null, error: '' })
+  const [extraction, setExtraction] = useState({ loading: true, isJobPosting: false, confidence: 'low', job: null, error: '' })
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
   const [formData, setFormData] = useState({
     company: '',
@@ -147,8 +147,9 @@ function App() {
           target: { tabId: tab.id },
           func: extractJobFromPage,
         })
-        const job = result?.result || null
-        setExtraction({ loading: false, job, error: '' })
+        const extractionResult = result?.result || { isJobPosting: false, confidence: 'low', job: null }
+        const job = extractionResult.job || null
+        setExtraction({ loading: false, ...extractionResult, error: '' })
         setFormData((current) => ({
           ...current,
           company: job?.company || '',
@@ -163,7 +164,7 @@ function App() {
         setSaveSuccess('')
         setIsDescriptionExpanded(false)
       } catch {
-        setExtraction({ loading: false, job: null, error: 'Unable to extract job details from this page.' })
+        setExtraction({ loading: false, isJobPosting: false, confidence: 'low', job: null, error: 'Unable to extract job details from this page.' })
         setFormError('')
         setSaveSuccess('')
         setIsDescriptionExpanded(false)
@@ -228,7 +229,14 @@ function App() {
         {extraction.error && <p className="extraction-error">{extraction.error}</p>}
       </header>
 
-      {extraction.job && (
+      {!extraction.loading && !extraction.error && !extraction.isJobPosting && (
+        <section className="not-job-state">
+          <p>This doesn't appear to be a job posting.</p>
+          <p>Open a job listing and try again.</p>
+        </section>
+      )}
+
+      {extraction.isJobPosting && extraction.job && (
         <form className="popup-application-form" onSubmit={handleSaveExtractedJob}>
           <dl className="popup-fields">
             <InlineEditField label="Company" value={formData.company} placeholder="Company not found" onSave={(value) => handleInlineFieldSave('company', value)} />
