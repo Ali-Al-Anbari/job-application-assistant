@@ -211,6 +211,11 @@ textarea:focus-visible {
   font-size: 13px;
 }
 
+.gmail-validation-message {
+  color: var(--dashboard-muted);
+  font-size: 13px;
+}
+
 .gmail-message span,
 .gmail-message time {
   color: var(--dashboard-muted);
@@ -303,6 +308,16 @@ textarea:focus-visible {
   color: var(--dashboard-text);
   background: var(--dashboard-bg);
   font-size: 12px;
+}
+
+.gmail-status-override {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 5px;
+  max-width: 220px;
+  color: var(--dashboard-muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .gmail-suggestion-actions {

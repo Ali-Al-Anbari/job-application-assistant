@@ -7,7 +7,7 @@ const classificationRules = [
   {
     name: 'Offer',
     status: 'Offer',
-    signals: ['offer letter', 'employment offer', 'pleased to offer', 'job offer'],
+    signals: [],
   },
   {
     name: 'Assessment',
@@ -54,6 +54,68 @@ function normalizeText(value) {
   return String(value || '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Determines whether an email has strong newsletter or digest characteristics.
+ * Strong evidence requires multiple digest-specific indicators, optionally
+ * supported by repeated post/article references.
+ *
+ * @param {string} subject Email subject text.
+ * @param {string} body Email body text; pass an empty string when only metadata is available.
+ * @returns {boolean} True when the content is strongly likely to be a digest or newsletter.
+ */
+export function isDigestLike(subject, body) {
+  const text = normalizeText(`${subject} ${body}`)
+  const digestSignals = [
+    'trending posts',
+    'top posts',
+    'latest posts',
+    'read more',
+    'comments',
+    'discover your next job',
+    'recommended jobs',
+    'industry news',
+    'career hacks',
+    'newsletter',
+    'unsubscribe',
+    'view online',
+    'careers news',
+  ]
+  const signalCount = digestSignals.filter((signal) => text.includes(normalizeText(signal))).length
+  const postMentions = (text.match(/\bpost(?:s)?\b/g) || []).length
+  return signalCount >= 3 || (signalCount >= 2 && postMentions >= 2)
+}
+
+function hasFirstPersonOfferStatement(subject, body) {
+  const text = normalizeText(`${subject} ${body}`)
+  return [
+    'i accepted the job offer',
+    'i got an offer',
+    'i received an offer',
+    'i recently got an offer',
+    'my offer',
+  ].some((signal) => text.includes(signal))
+}
+
+function hasRecipientDirectedOffer(subject, body) {
+  const text = normalizeText(`${subject} ${body}`)
+  const explicitOfferPatterns = [
+    /(?:we|i)\s+(?:are\s+)?(?:pleased|happy|excited|delighted)\s+to\s+offer\s+you\b/,
+    /(?:we|i)\s+would\s+like\s+to\s+offer\s+you\b/,
+    /offer\s+you\s+the\s+(?:position|role)\b/,
+    /your\s+(?:[a-z0-9]+\s+){0,3}offer\s+letter\b/,
+    /offer\s+letter\s+for\s+the\b/,
+    /attached\s+is\s+your\s+(?:[a-z0-9]+\s+){0,3}offer\s+letter\b/,
+    /employment\s+offer\s+for\s+(?:you|the\s+position|the\s+.{3,80}?\s+position)\b/,
+    /congratulations\b.{0,120}\b(?:offer|position)\b/,
+  ]
+  if (explicitOfferPatterns.some((pattern) => pattern.test(text))) {
+    return true
+  }
+
+  return /(?:we|i)\s+(?:are\s+)?(?:excited\s+to\s+)?extend\s+an\s+offer\b/.test(text)
+    && !hasFirstPersonOfferStatement(subject, body)
+}
+
 function normalizeCompany(value) {
   return normalizeText(value).replace(/\b(inc|llc|ltd|corp|corporation|co)\b$/, '').trim()
 }
@@ -70,16 +132,130 @@ function normalizeFrom(value) {
   }
 }
 
-function inferCompanyFromSender(value) {
-  const normalized = normalizeFrom(value)
-  const genericNames = /^(google|gmail|notifications?|no reply|noreply|recruiting|recruiter|hiring team)$/i
-  if (!normalized.displayName || genericNames.test(normalized.displayName)) {
+const excludedCompanyDomains = new Set([
+  'gmail',
+  'googlemail',
+  'outlook',
+  'hotmail',
+  'yahoo',
+  'icloud',
+  'greenhouse',
+  'lever',
+  'workday',
+  'workdayjobs',
+  'ashby',
+  'ashbyhq',
+  'smartrecruiters',
+  'icims',
+  'jobvite',
+  'successfactors',
+  'taleo',
+])
+
+function titleCaseCompany(value) {
+  return String(value || '')
+    .trim()
+    .split(/\s+/)
+    .map((word) => word ? word[0].toUpperCase() + word.slice(1) : word)
+    .join(' ')
+}
+
+function inferCompanyFromDomain(email) {
+  const domain = email.split('@')[1]?.toLowerCase() || ''
+  const domainLabel = domain.split('.').filter(Boolean).filter((part) => !['www', 'mail', 'email', 'careers', 'jobs', 'jobs2'].includes(part)).at(0)
+  if (!domainLabel || excludedCompanyDomains.has(domainLabel)) {
     return ''
   }
 
-  return normalized.displayName
+  return titleCaseCompany(domainLabel.replace(/[-_]+/g, ' '))
 }
 
+function inferCompanyFromSubject(subject) {
+  const patterns = [
+    /(?:thank you|thanks) for applying to\s+([^,.;\n]+?)(?:\s+for\b|[,.;\n]|$)/i,
+    /your application (?:at|to)\s+([^,.;\n]+?)(?:\s+for\b|[,.;\n]|$)/i,
+    /your\s+([^,.;\n]+?)\s+application\b/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = String(subject || '').match(pattern)
+    const value = match?.[1]?.trim()
+    if (value && !excludedCompanyDomains.has(normalizeText(value))) {
+      return value
+    }
+  }
+
+  return ''
+}
+
+/**
+ * Infers an employer name from explicit subject evidence, sender display text,
+ * or a branded sender domain while avoiding ATS and consumer-mail providers.
+ * Returns an empty string when the evidence is too weak to name a company.
+ *
+ * @param {{ from: string, subject?: string }} message Normalized Gmail suggestion data.
+ * @returns {string} The inferred company name, or an empty string.
+ */
+function inferCompany(message) {
+  const normalizedFrom = normalizeFrom(message.from)
+  const subjectCompany = inferCompanyFromSubject(message.subject)
+  if (subjectCompany) {
+    return subjectCompany
+  }
+
+  const genericNames = /^(google|gmail|notifications?|no reply|noreply|recruiting|recruiter|hiring team|careers|jobs)$/i
+  if (normalizedFrom.displayName && !genericNames.test(normalizedFrom.displayName)) {
+    return normalizedFrom.displayName
+      .replace(/\s+(recruiting|recruitment|hiring|careers?|jobs?|team)\s*$/i, '')
+      .trim()
+  }
+
+  return inferCompanyFromDomain(normalizedFrom.email)
+}
+
+/**
+ * Conservatively infers a role from a strong tracked-job match or explicit
+ * application-title phrasing in the subject and body. Generic recruiting text
+ * without a credible role returns an empty string.
+ *
+ * @param {{ subject?: string, bodyText?: string }} message Gmail message data.
+ * @param {Array<object>} jobs Saved applications used for strong matching.
+ * @returns {string} The inferred role, or an empty string.
+ */
+function inferRoleFromText(message, jobs) {
+  const matchedJob = matchMessageToJobs(message, jobs)
+  if (matchedJob.confidence === 'strong') {
+    return jobs.find((job) => job.id === matchedJob.jobId)?.role || ''
+  }
+
+  const text = `${message.subject || ''} ${message.bodyText || ''}`
+  const patterns = [
+    /(?:your|the)\s+(.{3,80}?)\s+application(?:\s+update|\s+status|\s+for|$)/i,
+    /(.{3,80}?)\s+application\s+(?:received|update|status)/i,
+  ]
+
+  for (const pattern of patterns) {
+    const value = text.match(pattern)?.[1]?.trim()
+    if (!value) continue
+    const normalizedValue = normalizeText(value)
+    if (!normalizedValue || /^(update|update regarding|regarding|confirmation|received)$/.test(normalizedValue)) continue
+    if (/\b(application|candidate|career|position|role|team|company)\b$/.test(normalizedValue)) continue
+    return value
+  }
+
+  return ''
+}
+
+/**
+ * Classifies a recruiting email into an application stage using deterministic
+ * subject, sender, and body signals. Offer classification additionally requires
+ * recipient-directed language and excludes first-person third-party statements.
+ *
+ * @param {string} subject Email subject text.
+ * @param {string} from Sender display or email text.
+ * @param {string} [body=''] Optional loaded email body text.
+ * @returns {{ name: string, suggestedStatus: string }} Classification name and mapped application status.
+ */
 function classifyMessage(subject, from, body = '') {
   const subjectText = normalizeText(`${subject} ${from}`)
   const bodyText = normalizeText(body)
@@ -87,6 +263,9 @@ function classifyMessage(subject, from, body = '') {
   const hasInterviewSignal = interviewRule.signals.some((signal) => subjectText.includes(normalizeText(signal)))
 
   for (const rule of classificationRules) {
+    if (rule.name === 'Offer') {
+      continue
+    }
     if (rule.signals.some((signal) => subjectText.includes(normalizeText(signal)))) {
       return { name: rule.name, suggestedStatus: rule.status }
     }
@@ -98,15 +277,16 @@ function classifyMessage(subject, from, body = '') {
 
   for (const rule of classificationRules) {
     if (rule.name === 'Offer') {
-      if (rule.signals.some((signal) => bodyText.includes(normalizeText(signal)))) {
-        return { name: rule.name, suggestedStatus: rule.status }
-      }
       continue
     }
 
     if (rule.signals.some((signal) => bodyText.includes(normalizeText(signal)))) {
       return { name: rule.name, suggestedStatus: rule.status }
     }
+  }
+
+  if (hasRecipientDirectedOffer(subjectText, bodyText) && !hasFirstPersonOfferStatement(subjectText, bodyText)) {
+    return { name: 'Offer', suggestedStatus: 'Offer' }
   }
 
   if (bodyText.includes('next steps') && bodyText.includes('interview')) {
@@ -120,6 +300,15 @@ function getRoleTokens(role) {
   return normalizeText(role).split(' ').filter((token) => token.length > 2 && !['and', 'the', 'for', 'with'].includes(token))
 }
 
+/**
+ * Matches a Gmail message to saved applications using company evidence in the
+ * subject, sender, or body and role tokens in the subject or body.
+ * Ambiguous company matches leave jobId empty and expose candidateJobIds.
+ *
+ * @param {{ subject?: string, from?: string, bodyText?: string }} message Gmail message data.
+ * @param {Array<object>} jobs Saved applications to match against.
+ * @returns {{ confidence: 'none'|'strong'|'possible'|'ambiguous', jobId: string, candidateJobIds: string[] }}
+ */
 function matchMessageToJobs(message, jobs) {
   const from = normalizeFrom(message.from)
   const subjectText = normalizeText(message.subject)
@@ -145,6 +334,15 @@ function parseDate(value) {
   return Number.isNaN(parsed) ? '' : new Date(parsed).toLocaleDateString('en-CA')
 }
 
+/**
+ * Builds the dashboard-facing review suggestion by combining classification,
+ * application matching, inferred fields, current status, and email date.
+ * The returned object preserves the original message fields.
+ *
+ * @param {object} message Normalized Gmail message data.
+ * @param {Array<object>} jobs Saved applications used for matching.
+ * @returns {object} Review suggestion with classification, matching, and inference fields.
+ */
 export function buildSuggestion(message, jobs) {
   const classification = classifyMessage(message.subject, message.from, message.bodyText)
   const match = matchMessageToJobs(message, jobs)
@@ -163,8 +361,8 @@ export function buildSuggestion(message, jobs) {
     currentStatus,
     canConfirm: Boolean(suggestedStatus && !sameStatus && (match.confidence === 'strong' || match.confidence === 'possible')),
     statusSuppressed: sameStatus,
-    inferredCompany: matchedJob?.company || inferCompanyFromSender(message.from),
-    inferredRole: match.confidence === 'strong' ? matchedJob?.role || '' : '',
+    inferredCompany: matchedJob?.company || inferCompany(message),
+    inferredRole: match.confidence === 'strong' ? matchedJob?.role || '' : inferRoleFromText(message, jobs),
     emailDate: parseDate(message.date || message.internalDate),
   }
 }
@@ -229,6 +427,14 @@ function isAttachmentPart(part) {
   )
 }
 
+/**
+ * Extracts readable plain text from a Gmail message payload by traversing MIME
+ * parts, skipping attachments, decoding text parts, and limiting the result to
+ * MAX_BODY_LENGTH.
+ *
+ * @param {object} payload Gmail message payload.
+ * @returns {{ text: string, truncated: boolean }} Extracted text and truncation state.
+ */
 function extractBodyText(payload) {
   const plainParts = []
   const htmlParts = []
@@ -276,6 +482,15 @@ async function parseGmailError(response, fallback) {
   return error
 }
 
+/**
+ * Fetches one Gmail message with format=full and returns its extracted readable
+ * body. The request is bounded by a timeout, and the raw message payload is not
+ * returned or persisted.
+ *
+ * @param {string} token OAuth access token for the Gmail API request.
+ * @param {string} messageId Gmail message ID.
+ * @returns {Promise<{ text: string, truncated: boolean, status: number }>} Extracted body result.
+ */
 export async function getMessageBody(token, messageId) {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), BODY_REQUEST_TIMEOUT_MS)
@@ -306,8 +521,23 @@ export async function getMessageBody(token, messageId) {
   }
 }
 
+/**
+ * Scans Gmail messages from the last seven days, excludes processed message IDs
+ * before metadata requests, keeps metadata-only bulk fetching, and builds
+ * suggestions only for messages that pass the cheap relevance filter.
+ * Full bodies are not fetched during scanning.
+ *
+ * @param {string} token OAuth access token for Gmail API requests.
+ * @param {Array<object>} jobs Saved applications used to build suggestions.
+ * @param {string[]} [processedIds=[]] Previously handled Gmail message IDs.
+ * @returns {Promise<Array<object>>} Metadata-built Gmail review suggestions.
+ */
 export async function scanGmail(token, jobs, processedIds = []) {
-  const listResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15', { headers: { Authorization: `Bearer ${token}` } })
+  const params = new URLSearchParams({
+    maxResults: '50',
+    q: 'newer_than:7d',
+  })
+  const listResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?${params}`, { headers: { Authorization: `Bearer ${token}` } })
   if (listResponse.status === 401) {
     const error = new Error('Gmail authentication expired.')
     error.status = 401
@@ -349,7 +579,7 @@ export async function scanGmail(token, jobs, processedIds = []) {
       from: normalizedFrom.displayName || normalizedFrom.email,
       date,
       internalDate: message.internalDate,
-      likelyJobRelated: jobRelatedSignals.some((signal) => searchableText.includes(normalizeText(signal))),
+      likelyJobRelated: !isDigestLike(subject, '') && jobRelatedSignals.some((signal) => searchableText.includes(normalizeText(signal))),
     }
   }).filter((message) => message.likelyJobRelated).map((message) => buildSuggestion(message, jobs))
 }

@@ -4,6 +4,7 @@ import {
   getMessageBody,
   getJobById,
   getProcessedMessageIds,
+  isDigestLike,
   markMessageProcessed,
   scanGmail,
   unmarkMessageProcessed,
@@ -88,6 +89,7 @@ function Dashboard() {
   const [gmailState, setGmailState] = useState({ status: 'disconnected', email: '', error: '' })
   const [gmailScan, setGmailScan] = useState({ status: 'idle', messages: [], error: '' })
   const [gmailSuggestions, setGmailSuggestions] = useState([])
+  const [gmailScanVersion, setGmailScanVersion] = useState(0)
   const [undoState, setUndoState] = useState(null)
   const [isUndoing, setIsUndoing] = useState(false)
   const [updatingMessageId, setUpdatingMessageId] = useState('')
@@ -166,21 +168,18 @@ function Dashboard() {
     loadJobs()
   }, [])
 
+  const currentSuggestionId = gmailSuggestions[0]?.id || ''
+
   useEffect(() => {
-    const suggestion = gmailSuggestions[0]
+    if (!currentSuggestionId || !jobs) return
 
-    if (!suggestion || !jobs) return
-    if (bodyFetchRef.current === suggestion.id) {
-    return
-  }
-
-  bodyFetchRef.current = suggestion.id
-
-  let cancelled = false
+    const messageId = currentSuggestionId
+    let cancelled = false
 
     async function loadBody() {
+      bodyFetchRef.current = messageId
       setGmailBody({
-        messageId: suggestion.id,
+        messageId,
         status: 'loading',
         text: '',
         truncated: false,
@@ -198,28 +197,53 @@ function Dashboard() {
           throw error
         }
 
-        const bodyResult = await getMessageBody(token, suggestion.id)
-        if (cancelled) return
-        const enrichedSuggestion = buildSuggestion({ ...suggestion, bodyText: bodyResult.text }, jobs)
+        const bodyResult = await getMessageBody(token, messageId)
+        if (cancelled || bodyFetchRef.current !== messageId) return
+        let isStrongDigest = false
+        setGmailSuggestions((suggestions) => {
+          const currentSuggestion = suggestions.find((item) => item.id === messageId)
+          isStrongDigest = Boolean(currentSuggestion && bodyResult.text && isDigestLike(currentSuggestion.subject, bodyResult.text))
+          if (isStrongDigest) {
+            return suggestions.filter((item) => item.id !== messageId)
+          }
+
+          return suggestions.map((item) => {
+            if (item.id !== messageId) return item
+            const enrichedSuggestion = buildSuggestion({ ...item, bodyText: bodyResult.text }, jobs)
+            return {
+              ...enrichedSuggestion,
+              selectedJobId: item.selectedJobId || enrichedSuggestion.jobId,
+              selectedStatus: item.selectedStatusManuallyChanged ? item.selectedStatus : enrichedSuggestion.suggestedStatus,
+              selectedStatusManuallyChanged: Boolean(item.selectedStatusManuallyChanged),
+            }
+          })
+        })
+        if (isStrongDigest) {
+          bodyFetchRef.current = ''
+          await markMessageProcessed(messageId)
+          if (cancelled) return
+          setGmailBody({ messageId: '', status: 'idle', text: '', truncated: false, error: '' })
+          setIsEmailExpanded(false)
+          return
+        }
+
         setGmailBody({
-          messageId: suggestion.id,
+          messageId,
           status: bodyResult.text ? 'loaded' : 'unavailable',
           text: bodyResult.text,
           truncated: bodyResult.truncated,
           error: bodyResult.text ? '' : 'Email body unavailable',
         })
-        setGmailSuggestions((suggestions) => suggestions.map((item) =>
-          item.id === suggestion.id
-            ? { ...enrichedSuggestion, selectedJobId: item.selectedJobId || enrichedSuggestion.jobId }
-            : item,
-        ))
       } catch (error) {
+        if (bodyFetchRef.current === messageId) {
+          bodyFetchRef.current = ''
+        }
         if (cancelled) return
         const bodyError = error.requiresScope
           ? 'Gmail needs to be reconnected with read-only email access.'
           : 'Email body unavailable. Try again.'
         setGmailBody({
-          messageId: suggestion.id,
+          messageId,
           status: 'error',
           text: '',
           truncated: false,
@@ -244,8 +268,11 @@ function Dashboard() {
     loadBody()
     return () => {
       cancelled = true
+      if (bodyFetchRef.current === messageId) {
+        bodyFetchRef.current = ''
+      }
     }
-  }, [gmailSuggestions, jobs])
+  }, [currentSuggestionId, gmailScanVersion, jobs])
 
   async function connectGmail() {
     setGmailState({ status: 'connecting', email: '', error: '' })
@@ -297,6 +324,8 @@ function Dashboard() {
 
   async function checkGmail() {
     setGmailScan({ status: 'checking', messages: [], error: '' })
+    setGmailScanVersion((version) => version + 1)
+    bodyFetchRef.current = ''
     setGmailBody({ messageId: '', status: 'idle', text: '', truncated: false, error: '' })
     setIsEmailExpanded(false)
     let token
@@ -317,6 +346,8 @@ function Dashboard() {
       setGmailSuggestions(suggestions.map((suggestion) => ({
         ...suggestion,
         selectedJobId: suggestion.jobId,
+        selectedStatus: suggestion.suggestedStatus,
+        selectedStatusManuallyChanged: false,
       })))
       setGmailScan({ status: 'success', messages: suggestions, error: '' })
     } catch (error) {
@@ -360,14 +391,24 @@ function Dashboard() {
     )
   }
 
+  function selectSuggestionStatus(messageId, status) {
+    setGmailSuggestions((suggestions) =>
+      suggestions.map((suggestion) =>
+        suggestion.id === messageId
+          ? { ...suggestion, selectedStatus: status, selectedStatusManuallyChanged: true }
+          : suggestion,
+      ),
+    )
+  }
+
   function startAddFromSuggestion(suggestion) {
     setPendingAddSuggestion(suggestion)
     setFormData({
       ...emptyJobForm,
-      company: suggestion.inferredCompany,
-      role: suggestion.inferredRole,
-      status: 'Applied',
-      dateApplied: suggestion.emailDate || new Date().toLocaleDateString('en-CA'),
+      company: suggestion.inferredCompany || '',
+      role: suggestion.inferredRole || '',
+      status: suggestion.selectedStatus || suggestion.suggestedStatus || '',
+      dateApplied: suggestion.classification === 'Application Received' ? suggestion.emailDate || '' : '',
     })
     setFormError('')
     setIsFormOpen(true)
@@ -379,13 +420,13 @@ function Dashboard() {
     }
     const jobId = suggestion.selectedJobId
     const job = getJobById(jobs, jobId)
-    const suggestedStatus = suggestion.suggestedStatus
+    const selectedStatus = suggestion.selectedStatus || suggestion.suggestedStatus
 
-    if (!job || !suggestedStatus) {
+    if (!job || !selectedStatus) {
       return
     }
 
-    if (job.status === suggestedStatus) {
+    if (job.status === selectedStatus) {
       return
     }
 
@@ -394,13 +435,11 @@ function Dashboard() {
       currentJob.id === job.id
         ? {
             ...currentJob,
-            status: suggestedStatus,
+            status: selectedStatus,
             dateApplied:
               currentJob.dateApplied ||
               (suggestion.classification === 'Application Received'
-                ? suggestion.internalDate
-                  ? new Date(Number(suggestion.internalDate)).toLocaleDateString('en-CA')
-                  : new Date().toLocaleDateString('en-CA')
+                ? suggestion.emailDate || ''
                 : ''),
           }
         : currentJob,
@@ -412,7 +451,7 @@ function Dashboard() {
       await window.chrome.storage.local.set({ jobs: updatedJobs })
       await markMessageProcessed(suggestion.id)
       setJobs(updatedJobs)
-      setUndoState({ job: previousJob, suggestion })
+      setUndoState({ type: 'updated', job: previousJob, suggestion })
       setIsEmailExpanded(false)
       setGmailSuggestions((suggestions) => suggestions.filter((item) => item.id !== suggestion.id))
     } catch {
@@ -430,9 +469,11 @@ function Dashboard() {
     setIsUndoing(true)
     setActionError('')
     try {
-      const restoredJobs = jobs.map((job) =>
-        job.id === undoState.job.id ? undoState.job : job,
-      )
+      const restoredJobs = undoState.type === 'created'
+        ? jobs.filter((job) => job.id !== undoState.jobId)
+        : jobs.map((job) =>
+          job.id === undoState.job.id ? undoState.job : job,
+        )
       await window.chrome.storage.local.set({ jobs: restoredJobs })
       await unmarkMessageProcessed(undoState.suggestion.id)
       setJobs(restoredJobs)
@@ -473,6 +514,7 @@ function Dashboard() {
   async function handleSubmit(event) {
     event.preventDefault()
     if (isSavingApplication) return
+    const sourceSuggestion = pendingAddSuggestion
 
     const company = formData.company.trim()
     const role = formData.role.trim()
@@ -501,10 +543,14 @@ function Dashboard() {
         notes: formData.notes.trim(),
         jobDescription: '',
       })
-      if (pendingAddSuggestion) {
-        await markMessageProcessed(pendingAddSuggestion.id)
-        setGmailSuggestions((suggestions) => suggestions.filter((suggestion) => suggestion.id !== pendingAddSuggestion.id))
+      if (sourceSuggestion) {
+        await markMessageProcessed(sourceSuggestion.id)
+        setGmailSuggestions((suggestions) => suggestions.filter((suggestion) => suggestion.id !== sourceSuggestion.id))
         setPendingAddSuggestion(null)
+        const createdJob = updatedJobs.find((job) => !jobs.some((currentJob) => currentJob.id === job.id))
+        if (createdJob) {
+          setUndoState({ type: 'created', jobId: createdJob.id, suggestion: sourceSuggestion })
+        }
       }
 
       setJobs(updatedJobs)
@@ -634,7 +680,7 @@ function Dashboard() {
                 onClick={checkGmail}
                 disabled={gmailScan.status === 'checking'}
               >
-                {gmailScan.status === 'checking' ? 'Checking Gmail...' : 'Check Gmail'}
+                {gmailScan.status === 'checking' ? 'Checking Gmail from the last 7 days...' : 'Check Gmail'}
               </button>
             </>
           ) : (
@@ -657,6 +703,7 @@ function Dashboard() {
         <button
           type="button"
           onClick={() => {
+            if (isFormOpen) setPendingAddSuggestion(null)
             setFormData(emptyJobForm)
             setFormError('')
             setIsFormOpen((open) => !open)
@@ -670,18 +717,28 @@ function Dashboard() {
       {gmailScan.status !== 'idle' && (
         <section className="gmail-results" aria-live="polite">
           <h2>Recent application emails</h2>
-          {gmailScan.status === 'checking' && <p>Checking Gmail...</p>}
+          {gmailScan.status === 'checking' && <p>Checking Gmail from the last 7 days...</p>}
           {gmailScan.status === 'error' && <p className="gmail-error">{gmailScan.error}</p>}
           {gmailSuggestions.length === 0 && gmailScan.status === 'success' && (
-            <p>No new application emails found.</p>
+            <p>No application emails to review from the last 7 days.</p>
           )}
           {gmailSuggestions.length > 0 && (
             <div className="gmail-message-list">
               {(() => {
                 const message = gmailSuggestions[0]
+                const isReviewable = gmailBody.messageId === message.id && (gmailBody.status === 'loaded' || gmailBody.status === 'error' || gmailBody.status === 'unavailable')
+
+                if (!isReviewable) {
+                  return (
+                    <div className="gmail-message gmail-validating" aria-live="polite">
+                      <span className="gmail-validation-message">Checking email...</span>
+                    </div>
+                  )
+                }
+
                 return (
                 <article key={message.id} className="gmail-message">
-                  <span className="gmail-queue-count">Email 1 of {gmailSuggestions.length}</span>
+                  <span className="gmail-queue-count">Email to review</span>
                   <strong>{message.from || 'Unknown sender'}</strong>
                   <span>{message.subject || '(No subject)'}</span>
                   {message.threadId && (
@@ -748,6 +805,20 @@ function Dashboard() {
                       <span className="gmail-body-message">{gmailBody.error || 'Email body unavailable'}</span>
                     )}
                   </div>
+                  <label className="gmail-status-override">
+                    Update status
+                    <select
+                      value={message.selectedStatus || ''}
+                      onChange={(event) => selectSuggestionStatus(message.id, event.target.value)}
+                    >
+                      <option value="">Select status...</option>
+                      {statuses.map((statusOption) => (
+                        <option key={statusOption} value={statusOption}>
+                          {statusOption}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {message.classification !== 'Unknown' &&
                     (message.confidence === 'ambiguous' || !message.jobId) && (
                     <select
@@ -763,16 +834,16 @@ function Dashboard() {
                     </select>
                   )}
                   <div className="gmail-suggestion-actions">
-                    {message.classification !== 'Unknown' && (
+                    {(message.selectedStatus || message.suggestedStatus) && (message.selectedJobId || message.jobId) && (
                       <button
                         type="button"
                         onClick={() => confirmSuggestion(message)}
-                        disabled={Boolean(updatingMessageId) || !message.suggestedStatus || !message.selectedJobId || message.statusSuppressed || getJobById(jobs, message.selectedJobId)?.status === message.suggestedStatus}
+                        disabled={Boolean(updatingMessageId) || getJobById(jobs, message.selectedJobId)?.status === (message.selectedStatus || message.suggestedStatus)}
                       >
                         {updatingMessageId === message.id ? 'Updating...' : 'Confirm Update'}
                       </button>
                     )}
-                    {message.classification === 'Application Received' && message.confidence === 'none' && (
+                    {(message.selectedStatus || message.suggestedStatus) && message.confidence === 'none' && !message.selectedJobId && !message.jobId && (
                       <button type="button" onClick={() => startAddFromSuggestion(message)}>
                         Add Application
                       </button>

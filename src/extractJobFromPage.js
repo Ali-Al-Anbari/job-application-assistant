@@ -1,3 +1,11 @@
+/**
+ * Extracts a job posting from the active page using JobPosting JSON-LD first,
+ * then a verified LinkedIn job pane, then a conservative generic page
+ * validation path. Generic pages are returned as non-job results when they do
+ * not show sufficient hiring evidence.
+ *
+ * @returns {{ isJobPosting: boolean, confidence: 'high'|'medium'|'low', job: { company: string, role: string, location: string, jobDescription: string, url: string }, validation: object }}
+ */
 export function extractJobFromPage() {
   function getMetaContent(selector) {
     return document.querySelector(selector)?.getAttribute('content')?.trim() || ''
