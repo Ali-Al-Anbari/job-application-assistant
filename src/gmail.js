@@ -5,11 +5,6 @@ const classificationRules = [
     signals: ['decided not to move forward', 'will not be moving forward', 'not moving forward', 'unfortunately', 'other candidates'],
   },
   {
-    name: 'Offer',
-    status: 'Offer',
-    signals: [],
-  },
-  {
     name: 'Assessment',
     status: 'Assessment',
     signals: ['coding assessment', 'technical assessment', 'coding challenge', 'take-home', 'online assessment', 'assessment'],
@@ -259,27 +254,14 @@ function inferRoleFromText(message, jobs) {
 function classifyMessage(subject, from, body = '') {
   const subjectText = normalizeText(`${subject} ${from}`)
   const bodyText = normalizeText(body)
-  const interviewRule = classificationRules.find((rule) => rule.name === 'Interview')
-  const hasInterviewSignal = interviewRule.signals.some((signal) => subjectText.includes(normalizeText(signal)))
 
   for (const rule of classificationRules) {
-    if (rule.name === 'Offer') {
-      continue
-    }
     if (rule.signals.some((signal) => subjectText.includes(normalizeText(signal)))) {
       return { name: rule.name, suggestedStatus: rule.status }
     }
   }
 
-  if (subjectText.includes('next steps') && hasInterviewSignal) {
-    return { name: 'Interview', suggestedStatus: 'Interview' }
-  }
-
   for (const rule of classificationRules) {
-    if (rule.name === 'Offer') {
-      continue
-    }
-
     if (rule.signals.some((signal) => bodyText.includes(normalizeText(signal)))) {
       return { name: rule.name, suggestedStatus: rule.status }
     }
@@ -287,10 +269,6 @@ function classifyMessage(subject, from, body = '') {
 
   if (hasRecipientDirectedOffer(subjectText, bodyText) && !hasFirstPersonOfferStatement(subjectText, bodyText)) {
     return { name: 'Offer', suggestedStatus: 'Offer' }
-  }
-
-  if (bodyText.includes('next steps') && bodyText.includes('interview')) {
-    return { name: 'Interview', suggestedStatus: 'Interview' }
   }
 
   return { name: 'Unknown', suggestedStatus: '' }
