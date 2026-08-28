@@ -149,6 +149,52 @@ export function extractJobFromPage() {
     )
   }
 
+  function normalizeLinkedInLocation(raw) {
+    const text = String(raw || '').trim()
+    if (!text) return ''
+
+    const suffixMatch = text.match(/^(.*)\(remote\)\s*$/i)
+    if (suffixMatch) {
+      const base = suffixMatch[1].trim()
+      return base ? `Remote — ${base}` : 'Remote'
+    }
+
+    const prefixMatch = text.match(/^remote\s*[,-]\s*(.+)$/i)
+    if (prefixMatch) {
+      return `Remote — ${prefixMatch[1].trim()}`
+    }
+
+    if (/^remote$/i.test(text)) return 'Remote'
+
+    return text
+  }
+
+  function getLinkedInLocation(pane, companyName) {
+    const lines = pane.innerText.split('\n').map((line) => line.trim()).filter(Boolean)
+    const noisePattern = /^(promoted|easy apply|\d+\s*(day|week|month|hour)s?\s*ago|[\d,]+\s*applicants?)$/i
+
+    const headerLine = lines.find((line) => line.includes('·'))
+    let headerLocation = ''
+    if (headerLine) {
+      const segments = headerLine.split('·').map((segment) => segment.trim()).filter(Boolean)
+      const candidates = segments.filter((segment) =>
+        segment && !noisePattern.test(segment) && segment.toLowerCase() !== companyName.toLowerCase(),
+      )
+      headerLocation = candidates.find((segment) => /remote/i.test(segment)) || candidates[0] || ''
+    }
+
+    const explicitLocationLine = lines.find((line) => /^location\s*:/i.test(line))
+    const explicitLocation = explicitLocationLine ? explicitLocationLine.replace(/^location\s*:\s*/i, '').trim() : ''
+
+    const rawLocation = /remote/i.test(explicitLocation)
+      ? explicitLocation
+      : /remote/i.test(headerLocation)
+        ? headerLocation
+        : headerLocation || explicitLocation
+
+    return normalizeLinkedInLocation(rawLocation)
+  }
+
   function getLinkedInDescription(pane) {
     const descriptionHeading = getTextElement(pane, 'About the job')
     if (!descriptionHeading) {
@@ -240,7 +286,8 @@ export function extractJobFromPage() {
     return words.length > 1 || roleWords.test(normalizedRole)
   }
 
-  function getGenericValidation(role, region, regionText, pageText, hasNonJobSchema) {
+  function getGenericValidation(role, region, regionText, pageText, nonJobSchemaTypes) {
+    const hasNonJobSchema = nonJobSchemaTypes.length > 0
     const contentGroups = [
       ['job description', 'about the role', 'about the job', 'responsibilities', "what you'll do", 'what you will do'],
       ['qualifications', 'requirements', 'required qualifications', 'preferred qualifications', 'who you are'],
@@ -268,7 +315,7 @@ export function extractJobFromPage() {
       hasSubstantialDescription,
       hasApplicationSignal,
       signalGroups: matchingGroups.length,
-      nonJobSchemaTypes: hasNonJobSchema.types,
+      nonJobSchemaTypes,
       hasCandidateRegion: Boolean(regionText),
       passed: passes,
     }
@@ -291,7 +338,6 @@ export function extractJobFromPage() {
 
   const nonJobSchemaNames = new Set(['softwareapplication', 'mobileapplication', 'product', 'article', 'newsarticle', 'recipe', 'videoobject'])
   const nonJobSchemaTypes = Array.from(schemaTypes).filter((type) => nonJobSchemaNames.has(type))
-  const hasNonJobSchema = { types: nonJobSchemaTypes }
 
   function getGenericDescription() {
     const region = getCandidateJobRegion()
@@ -305,7 +351,7 @@ export function extractJobFromPage() {
     const genericContent = getGenericDescription()
     const pageText = document.body.innerText?.trim() || ''
     const role = getGenericRole(genericContent.region)
-    const validation = getGenericValidation(role, genericContent.region, genericContent.text, pageText, hasNonJobSchema)
+    const validation = getGenericValidation(role, genericContent.region, genericContent.text, pageText, nonJobSchemaTypes)
     return {
       job: {
         role,
@@ -345,27 +391,16 @@ export function extractJobFromPage() {
 
     if (selectedJobAnchor && selectedJobPane) {
       hasVerifiedLinkedInJob = true
-      const headerLine = selectedJobPane.innerText
-        .split('\n')
-        .map((line) => line.trim())
-        .find((line) => line.includes('·'))
-      const locationFromHeader = headerLine?.split('·')[0].trim() || ''
-      const hasRemoteLocation = /\bremote\b/i.test(headerLine || '')
+      const companyLink = selectedJobPane.querySelector('a[href*="/company/"]')
+      const company = companyLink?.textContent?.trim() || ''
 
       linkedinJob = {
         role: selectedJobAnchor.textContent?.trim() || '',
-        company: '',
-        location: hasRemoteLocation
-          ? locationFromHeader
-            ? `Remote — ${locationFromHeader}`
-            : 'Remote'
-          : locationFromHeader,
+        company,
+        location: getLinkedInLocation(selectedJobPane, company),
         jobDescription: getLinkedInDescription(selectedJobPane),
         url: linkedinJobUrl,
       }
-
-      const companyLink = selectedJobPane.querySelector('a[href*="/company/"]')
-      linkedinJob.company = companyLink?.textContent?.trim() || ''
     }
   }
 
